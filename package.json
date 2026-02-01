@@ -1,0 +1,21 @@
+{
+  "name": "agenthq",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"pnpm --filter @agenthq/server dev\" \"pnpm --filter @agenthq/web dev\"",
+    "build": "pnpm -r build",
+    "build:daemon": "cd daemon && make build",
+    "build:daemon:all": "cd daemon && make build-all",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

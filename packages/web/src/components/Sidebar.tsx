@@ -1,7 +1,7 @@
 // Left sidebar with repo/worktree tree
 
 import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Folder, GitBranch, Plus, Server, Circle, RotateCcw } from 'lucide-react';
+import { ChevronDown, ChevronRight, Folder, GitBranch, Plus, Settings, Circle, RotateCcw } from 'lucide-react';
 import type { Repo, Environment, Worktree, Process } from '@agenthq/shared';
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
@@ -12,8 +12,11 @@ interface SidebarProps {
   worktrees: Map<string, Worktree>;
   processes: Map<string, Process>;
   selectedWorktreeId: string | null;
+  selectedEnvId: string;
   onSelectWorktree: (worktreeId: string) => void;
   onNewWorktree: (repoName: string, envId: string) => void;
+  onSelectEnv: (envId: string) => void;
+  onOpenSettings: () => void;
 }
 
 export function Sidebar({
@@ -22,15 +25,21 @@ export function Sidebar({
   worktrees,
   processes,
   selectedWorktreeId,
+  selectedEnvId,
   onSelectWorktree,
   onNewWorktree,
+  onSelectEnv,
+  onOpenSettings,
 }: SidebarProps) {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [expandedRepos, setExpandedRepos] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
+  // Fetch repos for selected environment
   useEffect(() => {
-    fetch('/api/repos')
+    setLoading(true);
+    const url = selectedEnvId ? `/api/repos?envId=${encodeURIComponent(selectedEnvId)}` : '/api/repos';
+    fetch(url)
       .then((res) => res.json())
       .then((data) => {
         setRepos(data);
@@ -39,7 +48,7 @@ export function Sidebar({
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [selectedEnvId]);
 
   const toggleRepo = (name: string) => {
     setExpandedRepos((prev) => {
@@ -54,7 +63,9 @@ export function Sidebar({
   };
 
   const getWorktreesForRepo = (repoName: string) => {
-    return Array.from(worktrees.values()).filter((w) => w.repoName === repoName);
+    return Array.from(worktrees.values()).filter(
+      (w) => w.repoName === repoName && w.envId === selectedEnvId
+    );
   };
 
   const getProcessCountForWorktree = (worktreeId: string) => {
@@ -63,13 +74,49 @@ export function Sidebar({
     ).length;
   };
 
-  const defaultEnvId = environments[0]?.id;
+  const selectedEnv = environments.find((e) => e.id === selectedEnvId);
+  const envConnected = selectedEnv?.status === 'connected';
 
   return (
     <div className="flex h-full flex-col border-r border-border bg-card">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h1 className="text-lg font-semibold">Agent HQ</h1>
+      {/* Header with Environment Selector */}
+      <div className="border-b border-border px-3 py-3">
+        <div className="flex items-center justify-between mb-2">
+          <h1 className="text-lg font-semibold">Agent HQ</h1>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onOpenSettings} title="Settings">
+            <Settings className="h-4 w-4" />
+          </Button>
+        </div>
+        
+        {/* Environment Dropdown */}
+        <div className="relative">
+          <select
+            value={selectedEnvId}
+            onChange={(e) => onSelectEnv(e.target.value)}
+            className="w-full appearance-none rounded-md border border-input bg-background px-3 py-1.5 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            {environments.map((env) => (
+              <option key={env.id} value={env.id}>
+                {env.name}
+              </option>
+            ))}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        </div>
+        
+        {/* Connection status for selected env */}
+        <div className="mt-2 flex items-center gap-2">
+          <Circle
+            className={cn(
+              'h-2 w-2',
+              envConnected ? 'fill-green-500 text-green-500' : 'fill-gray-500 text-gray-500'
+            )}
+          />
+          <span className="text-xs text-muted-foreground">
+            {envConnected ? 'Connected' : 'Disconnected'}
+            {selectedEnv?.type === 'exe' && ' (exe.dev)'}
+          </span>
+        </div>
       </div>
 
       {/* Repos tree */}
@@ -159,9 +206,9 @@ export function Sidebar({
                         })}
 
                       {/* New worktree button */}
-                      {defaultEnvId && (
+                      {envConnected && (
                         <button
-                          onClick={() => onNewWorktree(repo.name, defaultEnvId)}
+                          onClick={() => onNewWorktree(repo.name, selectedEnvId)}
                           className="flex w-full items-center gap-1 rounded px-2 py-1 text-sm text-muted-foreground hover:bg-accent/50"
                         >
                           <Plus className="h-3 w-3" />
@@ -177,38 +224,38 @@ export function Sidebar({
         )}
       </div>
 
-      {/* Environments section */}
+      {/* Environments summary */}
       <div className="border-t border-border p-2">
-        <div className="mb-2 flex items-center gap-2 px-2">
-          <Circle
-            className={cn(
-              'h-2 w-2',
-              connected ? 'fill-green-500 text-green-500' : 'fill-red-500 text-red-500'
-            )}
-          />
-          <span className="text-xs font-medium uppercase text-muted-foreground">
-            {connected ? 'Connected' : 'Disconnected'}
-          </span>
+        <div className="mb-2 px-2">
+          <span className="text-xs font-medium uppercase text-muted-foreground">Environments</span>
         </div>
-        {environments.length === 0 ? (
-          <div className="px-2 text-sm text-muted-foreground">No daemons connected</div>
-        ) : (
-          <div className="space-y-1">
-            {environments.map((env) => (
-              <div
-                key={env.id}
-                className="flex items-center gap-2 rounded px-2 py-1 text-sm group"
-              >
-                <Circle className="h-2 w-2 fill-green-500 text-green-500" />
-                <span className="flex-1 truncate">{env.name}</span>
+        <div className="space-y-1">
+          {environments.map((env) => (
+            <div
+              key={env.id}
+              className={cn(
+                "flex items-center gap-2 rounded px-2 py-1 text-sm group cursor-pointer",
+                env.id === selectedEnvId && "bg-accent"
+              )}
+              onClick={() => onSelectEnv(env.id)}
+            >
+              <Circle
+                className={cn(
+                  'h-2 w-2',
+                  env.status === 'connected' ? 'fill-green-500 text-green-500' : 'fill-gray-500 text-gray-500'
+                )}
+              />
+              <span className="flex-1 truncate">{env.name}</span>
+              {env.status === 'connected' && (
                 <Button
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={async () => {
+                  onClick={async (e) => {
+                    e.stopPropagation();
                     try {
-                      await fetch(`/api/environments/${encodeURIComponent(env.id)}`, {
-                        method: 'DELETE',
+                      await fetch(`/api/environments/${encodeURIComponent(env.id)}/restart`, {
+                        method: 'POST',
                       });
                     } catch (err) {
                       console.error('Failed to restart daemon:', err);
@@ -218,10 +265,10 @@ export function Sidebar({
                 >
                   <RotateCcw className="h-3 w-3" />
                 </Button>
-              </div>
-            ))}
-          </div>
-        )}
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

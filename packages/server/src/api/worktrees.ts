@@ -1,6 +1,7 @@
 // Worktree API routes
 
 import type { FastifyInstance } from 'fastify';
+import type { AgentType } from '@agenthq/shared';
 import { worktreeStore, envStore, repoStore, processStore } from '../state/index.js';
 import { daemonHub } from '../ws/daemon-hub.js';
 import { browserHub } from '../ws/browser-hub.js';
@@ -38,10 +39,10 @@ export async function registerWorktreeRoutes(app: FastifyInstance): Promise<void
         return reply.status(400).send({ error: 'Environment not connected' });
       }
 
-      // Validate repo
-      const repo = repoStore.get(name);
+      // Validate repo (must look up in the correct environment)
+      const repo = repoStore.getInEnv(envId, name);
       if (!repo) {
-        return reply.status(400).send({ error: 'Repo not found' });
+        return reply.status(400).send({ error: 'Repo not found in this environment' });
       }
 
       // Create worktree record (path will be updated when daemon confirms)
@@ -227,7 +228,7 @@ fi
   });
 
   // Merge with agent assistance (for conflicts)
-  app.post<{ Params: { id: string } }>('/api/worktrees/:id/merge-with-agent', async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: { agent?: AgentType } }>('/api/worktrees/:id/merge-with-agent', async (request, reply) => {
     const worktree = worktreeStore.get(request.params.id);
     if (!worktree) {
       return reply.status(404).send({ error: 'Worktree not found' });
@@ -243,10 +244,13 @@ fi
       return reply.status(400).send({ error: 'Main worktree not found for this repo' });
     }
 
+    // Agent type from request body, default to claude-code
+    const agent: AgentType = request.body?.agent ?? 'claude-code';
+
     // Spawn an agent process - associate with branch worktree for UI, but runs in main worktree
     const process = processStore.create({
       worktreeId: worktree.id, // Associate with branch worktree so tab appears there
-      agent: 'claude-code',
+      agent,
       envId: worktree.envId,
     });
 
@@ -266,7 +270,7 @@ You are currently in the main worktree at: ${mainWorktree.path}`;
       processId: process.id,
       worktreeId: worktree.id, // Track under branch worktree
       worktreePath: mainWorktree.path, // But run in main worktree where merge happens
-      agent: 'claude-code',
+      agent,
       args: [],
       task: mergePrompt,
       cols: 120,

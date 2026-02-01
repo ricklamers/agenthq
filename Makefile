@@ -4,7 +4,7 @@
 .PHONY: help start stop restart \
         start-server stop-server restart-server \
         start-web stop-web restart-web \
-        start-daemon stop-daemon restart-daemon build-daemon \
+        start-daemon stop-daemon restart-daemon build-daemon build-daemon-linux \
         .log-dir logs logs-server logs-web logs-daemon tail-logs \
         status clean clean-logs clean-all
 
@@ -72,11 +72,11 @@ status:
 	@echo "$(CYAN)Service Status:$(RESET)"
 	@echo ""
 	@echo -n "  Server:  "
-	@pgrep -f "tsx.*server" > /dev/null && echo "$(GREEN)running$(RESET)" || echo "$(RED)stopped$(RESET)"
+	@ss -tlnp 2>/dev/null | grep -q ':3000' && echo "$(GREEN)running$(RESET)" || echo "$(RED)stopped$(RESET)"
 	@echo -n "  Web:     "
-	@pgrep -f "vite.*web" > /dev/null && echo "$(GREEN)running$(RESET)" || echo "$(RED)stopped$(RESET)"
+	@ss -tlnp 2>/dev/null | grep -q ':5173' && echo "$(GREEN)running$(RESET)" || echo "$(RED)stopped$(RESET)"
 	@echo -n "  Daemon:  "
-	@pgrep -f "agenthq-daemon" > /dev/null && echo "$(GREEN)running$(RESET)" || echo "$(RED)stopped$(RESET)"
+	@pgrep -x "agenthq-daemon" > /dev/null && echo "$(GREEN)running$(RESET)" || echo "$(RED)stopped$(RESET)"
 	@echo ""
 	@echo "$(CYAN)Log Files:$(RESET)"
 	@echo "  $(LOG_DIR)/server.log"
@@ -120,14 +120,13 @@ tail-logs:
 
 stop-server:
 	@echo "$(YELLOW)Stopping server...$(RESET)"
-	@pkill -f "tsx.*packages/server" 2>/dev/null || true
-	@pkill -f "node.*packages/server" 2>/dev/null || true
+	@fuser -k 3000/tcp 2>/dev/null || true
 	@sleep 1
 	@echo "$(GREEN)Server stopped$(RESET)"
 
 start-server: .log-dir
 	@echo "$(YELLOW)Starting server...$(RESET)"
-	@if pgrep -f "tsx.*server" > /dev/null; then \
+	@if ss -tlnp 2>/dev/null | grep -q ':3000'; then \
 		echo "$(YELLOW)Server already running$(RESET)"; \
 	else \
 		echo "=== Server started at $$(date) ===" >> $(LOG_DIR)/server.log; \
@@ -146,14 +145,13 @@ restart-server: stop-server
 
 stop-web:
 	@echo "$(YELLOW)Stopping web...$(RESET)"
-	@pkill -f "vite.*packages/web" 2>/dev/null || true
-	@pkill -f "node.*vite" 2>/dev/null || true
+	@fuser -k 5173/tcp 2>/dev/null || true
 	@sleep 1
 	@echo "$(GREEN)Web stopped$(RESET)"
 
 start-web: .log-dir
 	@echo "$(YELLOW)Starting web...$(RESET)"
-	@if pgrep -f "vite" > /dev/null; then \
+	@if ss -tlnp 2>/dev/null | grep -q ':5173'; then \
 		echo "$(YELLOW)Web already running$(RESET)"; \
 	else \
 		echo "=== Web started at $$(date) ===" >> $(LOG_DIR)/web.log; \
@@ -172,19 +170,23 @@ restart-web: stop-web
 
 build-daemon:
 	@echo "$(YELLOW)Building daemon...$(RESET)"
-	@cd daemon && go build -o agenthq-daemon ./cmd/agenthq-daemon
+	@cd daemon && /usr/local/go/bin/go build -o agenthq-daemon ./cmd/agenthq-daemon
 	@echo "$(GREEN)Daemon built$(RESET)"
+
+build-daemon-linux:
+	@echo "$(YELLOW)Building daemon for Linux amd64...$(RESET)"
+	@cd daemon && GOOS=linux GOARCH=amd64 /usr/local/go/bin/go build -o agenthq-daemon-linux-amd64 ./cmd/agenthq-daemon
+	@echo "$(GREEN)Daemon built: daemon/agenthq-daemon-linux-amd64$(RESET)"
 
 stop-daemon:
 	@echo "$(YELLOW)Stopping daemon...$(RESET)"
-	@pkill -f "agenthq-daemon" 2>/dev/null || true
-	@pkill -f "go run.*agenthq-daemon" 2>/dev/null || true
+	@pkill -x "agenthq-daemon" 2>/dev/null || true
 	@sleep 1
 	@echo "$(GREEN)Daemon stopped$(RESET)"
 
 start-daemon: build-daemon .log-dir
 	@echo "$(YELLOW)Starting daemon...$(RESET)"
-	@if pgrep -f "agenthq-daemon" > /dev/null; then \
+	@if pgrep -x "agenthq-daemon" > /dev/null; then \
 		echo "$(YELLOW)Daemon already running$(RESET)"; \
 	else \
 		echo "=== Daemon started at $$(date) ===" >> $(LOG_DIR)/daemon.log; \

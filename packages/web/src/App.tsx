@@ -1,12 +1,13 @@
 // Main App component
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import type { AgentType } from '@agenthq/shared';
 import { useWebSocket } from './hooks/useWebSocket';
 import { Sidebar } from './components/Sidebar';
 import { SplitTerminalContainer, createDefaultPaneState, type PaneLayoutState } from './components/SplitTerminalContainer';
 import { SpawnDialog } from './components/SpawnDialog';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { SettingsPage } from './components/SettingsPage';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './components/ui/resizable';
 
 type ConfirmAction =
@@ -14,9 +15,21 @@ type ConfirmAction =
   | { type: 'remove-process'; processId: string }
   | { type: 'archive-worktree' };
 
+const SELECTED_ENV_STORAGE_KEY = 'agenthq:selectedEnvId';
+
 export function App() {
   const { connected, environments, worktrees, processes, send, onPtyData } = useWebSocket();
   const [selectedWorktreeId, setSelectedWorktreeId] = useState<string | null>(null);
+  const [selectedEnvId, setSelectedEnvId] = useState<string>(() => {
+    return localStorage.getItem(SELECTED_ENV_STORAGE_KEY) ?? 'local';
+  });
+  
+  // Persist selected environment to localStorage
+  useEffect(() => {
+    localStorage.setItem(SELECTED_ENV_STORAGE_KEY, selectedEnvId);
+  }, [selectedEnvId]);
+  
+  const [showSettings, setShowSettings] = useState(false);
   const [spawnDialog, setSpawnDialog] = useState<{ worktreeId: string; envId: string; cols?: number; rows?: number } | null>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   
@@ -70,6 +83,21 @@ export function App() {
     }
   }, [selectedWorktreeId, worktrees, environments, processes, paneStates]);
 
+  // Track worktree IDs that are pending (waiting for path to be set by daemon)
+  const [pendingWorktreeId, setPendingWorktreeId] = useState<string | null>(null);
+
+  // Watch for pending worktree to become ready (path set)
+  useEffect(() => {
+    if (!pendingWorktreeId) return;
+    
+    const worktree = worktrees.get(pendingWorktreeId);
+    if (worktree?.path) {
+      // Worktree is ready, open spawn dialog
+      setPendingWorktreeId(null);
+      setSpawnDialog({ worktreeId: pendingWorktreeId, envId: worktree.envId ?? 'local' });
+    }
+  }, [pendingWorktreeId, worktrees]);
+
   const handleNewWorktree = async (repoName: string, envId: string) => {
     try {
       const res = await fetch(`/api/repos/${encodeURIComponent(repoName)}/worktrees`, {
@@ -87,8 +115,8 @@ export function App() {
           next.set(worktree.id, createDefaultPaneState());
           return next;
         });
-        // Auto-open spawn dialog for the new worktree
-        setSpawnDialog({ worktreeId: worktree.id, envId });
+        // Mark as pending - spawn dialog will open when path is set
+        setPendingWorktreeId(worktree.id);
       } else {
         const error = await res.json();
         console.error('Failed to create worktree:', error);
@@ -217,10 +245,14 @@ export function App() {
     }
   };
 
-  const handleMergeWithAgent = async (): Promise<string | null> => {
+  const handleMergeWithAgent = async (agent: AgentType): Promise<string | null> => {
     if (!selectedWorktreeId) return null;
     try {
-      const res = await fetch(`/api/worktrees/${selectedWorktreeId}/merge-with-agent`, { method: 'POST' });
+      const res = await fetch(`/api/worktrees/${selectedWorktreeId}/merge-with-agent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent }),
+      });
       if (!res.ok) {
         const error = await res.json();
         console.error('Failed to start agent merge:', error);
@@ -236,15 +268,17 @@ export function App() {
     }
   };
 
+  // Primary action: Kill + Remove (for kill-process dialog)
   const handleConfirmAction = async () => {
     if (!confirmAction) return;
 
     switch (confirmAction.type) {
       case 'kill-process': {
+        // Primary action: Kill AND remove tab
         try {
-          await fetch(`/api/processes/${confirmAction.processId}`, { method: 'DELETE' });
+          await fetch(`/api/processes/${confirmAction.processId}?remove=true`, { method: 'DELETE' });
         } catch (err) {
-          console.error('Failed to kill process:', err);
+          console.error('Failed to kill and remove process:', err);
         }
         break;
       }
@@ -270,6 +304,21 @@ export function App() {
     setConfirmAction(null);
   };
 
+  // Secondary action: Kill only (keep tab)
+  const handleSecondaryAction = async () => {
+    if (!confirmAction) return;
+
+    if (confirmAction.type === 'kill-process') {
+      try {
+        await fetch(`/api/processes/${confirmAction.processId}`, { method: 'DELETE' });
+      } catch (err) {
+        console.error('Failed to kill process:', err);
+      }
+    }
+
+    setConfirmAction(null);
+  };
+
   const getConfirmDialogProps = () => {
     if (!confirmAction) return null;
 
@@ -278,8 +327,10 @@ export function App() {
         return {
           title: 'Kill Process',
           description: 'Are you sure you want to kill this process?',
-          confirmLabel: 'Kill',
+          confirmLabel: 'Kill + Remove',
+          secondaryLabel: 'Kill',
           variant: 'destructive' as const,
+          icon: 'stop' as const,
         };
       case 'remove-process':
         return {
@@ -287,6 +338,7 @@ export function App() {
           description: 'Remove this process tab from the worktree?',
           confirmLabel: 'Remove',
           variant: 'destructive' as const,
+          icon: 'trash' as const,
         };
       case 'archive-worktree':
         return {
@@ -294,9 +346,20 @@ export function App() {
           description: 'Archive this worktree? All processes will be killed.',
           confirmLabel: 'Archive',
           variant: 'destructive' as const,
+          icon: 'archive' as const,
         };
     }
   };
+
+  // Show settings page
+  if (showSettings) {
+    return (
+      <SettingsPage
+        onBack={() => setShowSettings(false)}
+        environments={environments}
+      />
+    );
+  }
 
   return (
     <div className="h-screen w-screen overflow-hidden">
@@ -309,8 +372,11 @@ export function App() {
             worktrees={worktrees}
             processes={processes}
             selectedWorktreeId={selectedWorktreeId}
+            selectedEnvId={selectedEnvId}
             onSelectWorktree={handleSelectWorktree}
             onNewWorktree={handleNewWorktree}
+            onSelectEnv={setSelectedEnvId}
+            onOpenSettings={() => setShowSettings(true)}
           />
         </ResizablePanel>
 
@@ -351,6 +417,7 @@ export function App() {
         <ConfirmDialog
           open={true}
           onConfirm={handleConfirmAction}
+          onSecondary={handleSecondaryAction}
           onCancel={() => setConfirmAction(null)}
           {...getConfirmDialogProps()!}
         />

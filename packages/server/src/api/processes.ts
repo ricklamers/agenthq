@@ -49,6 +49,11 @@ export async function registerProcessRoutes(app: FastifyInstance): Promise<void>
         return reply.status(400).send({ error: 'Worktree not found' });
       }
 
+      // Worktree must have a path (set when daemon confirms worktree creation)
+      if (!worktree.path) {
+        return reply.status(400).send({ error: 'Worktree not ready - path not yet set by daemon' });
+      }
+
       // Create process
       const process = processStore.create({
         worktreeId,

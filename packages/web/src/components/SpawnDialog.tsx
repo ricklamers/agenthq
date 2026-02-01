@@ -9,6 +9,7 @@ const AGENT_OPTIONS: { value: AgentType; label: string; description: string; sup
   { value: 'claude-code', label: 'Claude Code', description: 'Anthropic coding agent', supportsYolo: true },
   { value: 'codex-cli', label: 'Codex CLI', description: 'OpenAI coding agent', supportsYolo: true },
   { value: 'cursor-agent', label: 'Cursor Agent', description: 'Cursor coding agent', supportsYolo: true },
+  { value: 'droid-cli', label: 'Droid CLI', description: 'Factory AI coding agent', supportsYolo: false },
   { value: 'kimi-cli', label: 'Kimi CLI', description: 'Moonshot coding agent', supportsYolo: true },
 ];
 

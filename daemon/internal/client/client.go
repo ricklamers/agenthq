@@ -4,6 +4,7 @@ package client
 import (
 	"encoding/json"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,8 +15,10 @@ import (
 // Client manages the WebSocket connection to the server.
 type Client struct {
 	url          string
+	authToken    string
 	envID        string
 	envName      string
+	workspace    string
 	conn         *websocket.Conn
 	mu           sync.Mutex
 	done         chan struct{}
@@ -24,11 +27,13 @@ type Client struct {
 }
 
 // New creates a new client.
-func New(url, envID, envName string, onMessage func(protocol.ServerMessage), onDisconnect func()) *Client {
+func New(url, authToken, envID, envName, workspace string, onMessage func(protocol.ServerMessage), onDisconnect func()) *Client {
 	return &Client{
 		url:          url,
+		authToken:    authToken,
 		envID:        envID,
 		envName:      envName,
+		workspace:    workspace,
 		done:         make(chan struct{}),
 		onMessage:    onMessage,
 		onDisconnect: onDisconnect,
@@ -37,7 +42,17 @@ func New(url, envID, envName string, onMessage func(protocol.ServerMessage), onD
 
 // Connect establishes connection to the server.
 func (c *Client) Connect() error {
-	conn, _, err := websocket.DefaultDialer.Dial(c.url, nil)
+	// Add auth token as query parameter if provided
+	url := c.url
+	if c.authToken != "" {
+		if strings.Contains(url, "?") {
+			url += "&token=" + c.authToken
+		} else {
+			url += "?token=" + c.authToken
+		}
+	}
+
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
 		return err
 	}
@@ -51,6 +66,7 @@ func (c *Client) Connect() error {
 		Type:         protocol.MsgTypeRegister,
 		EnvID:        c.envID,
 		EnvName:      c.envName,
+		Workspace:    c.workspace,
 		Capabilities: []string{"bash", "claude-code", "codex-cli", "cursor-agent"},
 	})
 

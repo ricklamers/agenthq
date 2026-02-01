@@ -11,21 +11,31 @@ const (
 	AgentCodexCLI    AgentType = "codex-cli"
 	AgentCursorAgent AgentType = "cursor-agent"
 	AgentKimiCLI     AgentType = "kimi-cli"
+	AgentDroidCLI    AgentType = "droid-cli"
 	AgentInkTest     AgentType = "ink-test"
 )
 
+// RepoInfo represents a git repository
+type RepoInfo struct {
+	Name          string `json:"name"`
+	Path          string `json:"path"`
+	DefaultBranch string `json:"defaultBranch"`
+}
+
 // DaemonMessage is sent from daemon to server.
 type DaemonMessage struct {
-	Type       string `json:"type"`
-	EnvID      string `json:"envId,omitempty"`
-	EnvName    string `json:"envName,omitempty"`
-	Capabilities []string `json:"capabilities,omitempty"`
-	ProcessID  string `json:"processId,omitempty"`
-	WorktreeID string `json:"worktreeId,omitempty"`
-	Data       string `json:"data,omitempty"`
-	ExitCode   int    `json:"exitCode,omitempty"`
-	Branch     string `json:"branch,omitempty"`
-	Path       string `json:"path,omitempty"`
+	Type         string     `json:"type"`
+	EnvID        string     `json:"envId,omitempty"`
+	EnvName      string     `json:"envName,omitempty"`
+	Capabilities []string   `json:"capabilities,omitempty"`
+	Workspace    string     `json:"workspace,omitempty"`
+	ProcessID    string     `json:"processId,omitempty"`
+	WorktreeID   string     `json:"worktreeId,omitempty"`
+	Data         string     `json:"data,omitempty"`
+	ExitCode     int        `json:"exitCode,omitempty"`
+	Branch       string     `json:"branch,omitempty"`
+	Path         string     `json:"path,omitempty"`
+	Repos        []RepoInfo `json:"repos,omitempty"`
 }
 
 // ServerMessage is received from server by daemon.
@@ -55,6 +65,7 @@ const (
 	MsgTypeProcessExit    = "process-exit"
 	MsgTypeWorktreeReady  = "worktree-ready"
 	MsgTypeBranchChanged  = "branch-changed"
+	MsgTypeReposList      = "repos-list"
 )
 
 // Message types from server to daemon
@@ -65,6 +76,7 @@ const (
 	MsgTypeResize         = "resize"
 	MsgTypeKill           = "kill"
 	MsgTypeRemoveWorktree = "remove-worktree"
+	MsgTypeListRepos      = "list-repos"
 )
 
 // Agent command mappings
@@ -75,5 +87,6 @@ var AgentCommands = map[AgentType]string{
 	AgentCodexCLI:    "codex",
 	AgentCursorAgent: "cursor-agent",
 	AgentKimiCLI:     "kimi",
+	AgentDroidCLI:    "droid",
 	AgentInkTest:     "node /tmp/ink-test/test.js",
 }

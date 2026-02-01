@@ -3,12 +3,14 @@ package main
 
 import (
 	"encoding/base64"
+	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,21 +21,40 @@ import (
 
 var version = "dev"
 
+// Global workspace path
+var workspace string
+
 func main() {
+	// Parse command line flags
+	flag.StringVar(&workspace, "workspace", "", "Workspace directory containing repositories")
+	flag.Parse()
+
 	// Get server URL from environment
 	serverURL := os.Getenv("AGENTHQ_SERVER_URL")
 	if serverURL == "" {
 		serverURL = "ws://localhost:3000/ws/daemon"
 	}
 
-	// Generate environment ID and name
+	// Get auth token for remote connections
+	authToken := os.Getenv("AGENTHQ_AUTH_TOKEN")
+
+	// Get environment ID from environment variable or generate one
 	hostname, _ := os.Hostname()
-	envID := fmt.Sprintf("daemon-%s-%d", hostname, time.Now().Unix())
+	envID := os.Getenv("AGENTHQ_ENV_ID")
+	if envID == "" {
+		envID = fmt.Sprintf("daemon-%s-%d", hostname, time.Now().Unix())
+	}
 	envName := hostname
 
 	log.Printf("Agent HQ Daemon %s", version)
 	log.Printf("Environment: %s (%s)", envName, envID)
 	log.Printf("Connecting to: %s", serverURL)
+	if authToken != "" {
+		log.Printf("Auth token: configured")
+	}
+	if workspace != "" {
+		log.Printf("Workspace: %s", workspace)
+	}
 
 	var wsClient *client.Client
 	var sessionMgr *session.Manager
@@ -64,7 +85,7 @@ func main() {
 	reconnectChan := make(chan struct{}, 1)
 
 	// Create WebSocket client with reconnect callback
-	wsClient = client.New(serverURL, envID, envName,
+	wsClient = client.New(serverURL, authToken, envID, envName, workspace,
 		func(msg protocol.ServerMessage) {
 			handleServerMessage(wsClient, sessionMgr, msg)
 		},
@@ -100,9 +121,12 @@ func main() {
 			case <-reconnectChan:
 				log.Printf("Disconnected. Reconnecting in 2s...")
 				time.Sleep(2 * time.Second)
-				// Generate new env ID for reconnection
-				envID = fmt.Sprintf("daemon-%s-%d", hostname, time.Now().Unix())
-				wsClient = client.New(serverURL, envID, envName,
+				// For sprites environments, keep the same ID
+				// For local, generate new one if not explicitly set
+				if os.Getenv("AGENTHQ_ENV_ID") == "" {
+					envID = fmt.Sprintf("daemon-%s-%d", hostname, time.Now().Unix())
+				}
+				wsClient = client.New(serverURL, authToken, envID, envName, workspace,
 					func(msg protocol.ServerMessage) {
 						handleServerMessage(wsClient, sessionMgr, msg)
 					},
@@ -171,6 +195,14 @@ func handleServerMessage(wsClient *client.Client, mgr *session.Manager, msg prot
 		log.Printf("Remove worktree request: worktreeId=%s path=%s", msg.WorktreeID, msg.WorktreePath)
 		go removeWorktree(msg.WorktreePath)
 
+	case protocol.MsgTypeListRepos:
+		log.Printf("List repos request")
+		repos := scanWorkspace()
+		wsClient.Send(protocol.DaemonMessage{
+			Type:  protocol.MsgTypeReposList,
+			Repos: repos,
+		})
+
 	default:
 		log.Printf("Unknown message type: %s", msg.Type)
 	}
@@ -238,4 +270,58 @@ func removeWorktree(worktreePath string) {
 	}
 
 	log.Printf("Removed worktree at %s", worktreePath)
+}
+
+// scanWorkspace scans the workspace directory for git repositories
+func scanWorkspace() []protocol.RepoInfo {
+	var repos []protocol.RepoInfo
+
+	if workspace == "" {
+		log.Printf("No workspace configured, returning empty repos list")
+		return repos
+	}
+
+	entries, err := os.ReadDir(workspace)
+	if err != nil {
+		log.Printf("Failed to read workspace directory: %v", err)
+		return repos
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		repoPath := filepath.Join(workspace, entry.Name())
+		gitPath := filepath.Join(repoPath, ".git")
+
+		// Check if it's a git repo
+		if info, err := os.Stat(gitPath); err == nil && info.IsDir() {
+			defaultBranch := getDefaultBranch(repoPath)
+			repos = append(repos, protocol.RepoInfo{
+				Name:          entry.Name(),
+				Path:          repoPath,
+				DefaultBranch: defaultBranch,
+			})
+		}
+	}
+
+	log.Printf("Found %d repositories in workspace", len(repos))
+	return repos
+}
+
+// getDefaultBranch reads the default branch from .git/HEAD
+func getDefaultBranch(repoPath string) string {
+	headPath := filepath.Join(repoPath, ".git", "HEAD")
+	content, err := os.ReadFile(headPath)
+	if err != nil {
+		return "main"
+	}
+
+	line := strings.TrimSpace(string(content))
+	if strings.HasPrefix(line, "ref: refs/heads/") {
+		return strings.TrimPrefix(line, "ref: refs/heads/")
+	}
+
+	return "main"
 }

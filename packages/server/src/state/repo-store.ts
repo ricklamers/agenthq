@@ -1,4 +1,4 @@
-// Repository management - reads from workspace
+// Repository management - environment-aware
 
 import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,8 +7,18 @@ import type { Repo } from '@agenthq/shared';
 const META_DIR = '.agenthq-meta';
 const REPOS_FILE = 'repos.json';
 
+// Repo data as received from daemon
+interface DaemonRepo {
+  name: string;
+  path: string;
+  defaultBranch: string;
+}
+
 class RepoStore {
+  // Local workspace path
   private workspace: string;
+  // Repos by environment ID (for remote environments)
+  private envRepos = new Map<string, Repo[]>();
 
   constructor() {
     this.workspace = process.env.AGENTHQ_WORKSPACE ?? '';
@@ -38,9 +48,43 @@ class RepoStore {
   }
 
   /**
-   * Scan workspace for git repos and return them
+   * Set repos for an environment (received from daemon)
    */
-  getAll(): Repo[] {
+  setEnvRepos(envId: string, repos: DaemonRepo[]): void {
+    this.envRepos.set(envId, repos.map((r) => ({
+      name: r.name,
+      path: r.path,
+      defaultBranch: r.defaultBranch,
+      envId,
+    })));
+  }
+
+  /**
+   * Clear repos for an environment (when daemon disconnects)
+   */
+  clearEnvRepos(envId: string): void {
+    this.envRepos.delete(envId);
+  }
+
+  /**
+   * Get repos for a specific environment
+   * For local environment, scans filesystem
+   * For remote environments, returns cached repos from daemon
+   */
+  getByEnv(envId: string): Repo[] {
+    // For local environment, scan the local workspace
+    if (envId === 'local') {
+      return this.scanLocalWorkspace();
+    }
+
+    // For remote environments, return cached repos
+    return this.envRepos.get(envId) ?? [];
+  }
+
+  /**
+   * Scan local workspace for git repos
+   */
+  private scanLocalWorkspace(): Repo[] {
     if (!this.workspace || !existsSync(this.workspace)) {
       return [];
     }
@@ -62,6 +106,7 @@ class RepoStore {
               name: entry,
               path: entryPath,
               defaultBranch: this.getDefaultBranch(entryPath),
+              envId: 'local',
             });
           }
         }
@@ -73,6 +118,26 @@ class RepoStore {
     return repos;
   }
 
+  /**
+   * Get all repos (all environments) - for backwards compatibility
+   */
+  getAll(): Repo[] {
+    const all: Repo[] = [];
+    
+    // Local repos
+    all.push(...this.scanLocalWorkspace());
+    
+    // Remote repos
+    for (const repos of Array.from(this.envRepos.values())) {
+      all.push(...repos);
+    }
+
+    return all;
+  }
+
+  /**
+   * Get a specific repo by name (in local environment)
+   */
   get(name: string): Repo | undefined {
     const repoPath = join(this.workspace, name);
     if (!existsSync(repoPath) || !existsSync(join(repoPath, '.git'))) {
@@ -83,7 +148,16 @@ class RepoStore {
       name,
       path: repoPath,
       defaultBranch: this.getDefaultBranch(repoPath),
+      envId: 'local',
     };
+  }
+
+  /**
+   * Get a specific repo by name in a specific environment
+   */
+  getInEnv(envId: string, name: string): Repo | undefined {
+    const repos = this.getByEnv(envId);
+    return repos.find((r) => r.name === name);
   }
 
   private getDefaultBranch(repoPath: string): string {

@@ -7,9 +7,9 @@ import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEFAULT_PORT } from '@agenthq/shared';
-import { repoStore } from './state/index.js';
+import { repoStore, configStore } from './state/index.js';
 import { registerDaemonWs, registerBrowserWs } from './ws/index.js';
-import { registerRepoRoutes, registerWorktreeRoutes, registerProcessRoutes, registerEnvRoutes } from './api/index.js';
+import { registerRepoRoutes, registerWorktreeRoutes, registerProcessRoutes, registerEnvRoutes, registerConfigRoutes } from './api/index.js';
 
 // Validate environment
 const workspace = process.env.AGENTHQ_WORKSPACE;
@@ -24,8 +24,9 @@ if (!existsSync(resolvedWorkspace)) {
   process.exit(1);
 }
 
-// Initialize repo store with workspace
+// Initialize stores with workspace
 repoStore.setWorkspace(resolvedWorkspace);
+configStore.setWorkspace(resolvedWorkspace);
 
 const port = parseInt(process.env.AGENTHQ_PORT ?? String(DEFAULT_PORT), 10);
 
@@ -55,6 +56,7 @@ await registerRepoRoutes(app);
 await registerWorktreeRoutes(app);
 await registerProcessRoutes(app);
 await registerEnvRoutes(app);
+await registerConfigRoutes(app);
 
 // Serve static files in production
 const webDistPath = join(import.meta.dirname, '../../web/dist');

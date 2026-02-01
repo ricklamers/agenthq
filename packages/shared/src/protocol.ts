@@ -1,20 +1,21 @@
 // Protocol messages between daemon, server, and browser
 
-import type { AgentType, Environment, Process, Worktree } from './types.js';
+import type { AgentType, Environment, Process, Repo, Worktree } from './types.js';
 
 // ============================================
 // Daemon -> Server messages
 // ============================================
 
 export type DaemonToServerMessage =
-  | { type: 'register'; envId: string; envName: string; capabilities: string[] }
+  | { type: 'register'; envId: string; envName: string; capabilities: string[]; workspace?: string }
   | { type: 'heartbeat' }
   | { type: 'pty-data'; processId: string; data: string }
   | { type: 'buffer-clear'; processId: string }
   | { type: 'process-started'; processId: string }
   | { type: 'process-exit'; processId: string; exitCode: number }
   | { type: 'worktree-ready'; worktreeId: string; path: string; branch: string }
-  | { type: 'branch-changed'; worktreeId: string; branch: string };
+  | { type: 'branch-changed'; worktreeId: string; branch: string }
+  | { type: 'repos-list'; repos: Array<{ name: string; path: string; defaultBranch: string }> };
 
 // ============================================
 // Server -> Daemon messages
@@ -42,7 +43,8 @@ export type ServerToDaemonMessage =
   | { type: 'pty-input'; processId: string; data: string }
   | { type: 'resize'; processId: string; cols: number; rows: number }
   | { type: 'kill'; processId: string }
-  | { type: 'remove-worktree'; worktreeId: string; worktreePath: string };
+  | { type: 'remove-worktree'; worktreeId: string; worktreePath: string }
+  | { type: 'list-repos' };
 
 // ============================================
 // Browser -> Server messages

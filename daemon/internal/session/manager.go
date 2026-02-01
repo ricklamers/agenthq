@@ -98,7 +98,14 @@ func (m *Manager) Spawn(processID string, agent protocol.AgentType, worktreePath
 		if task != "" {
 			// Escape single quotes in task and wrap in single quotes
 			escapedTask := strings.ReplaceAll(task, "'", "'\\''")
-			fullCmd = agentCmd + " '" + escapedTask + "'"
+			// Different agents have different prompt flags
+			if agent == protocol.AgentKimiCLI {
+				// kimi uses -p or --prompt for initial prompt
+				fullCmd = agentCmd + " -p '" + escapedTask + "'"
+			} else {
+				// claude, codex, cursor-agent accept prompt as positional arg
+				fullCmd = agentCmd + " '" + escapedTask + "'"
+			}
 		}
 		
 		args = []string{"-l", "-c", fullCmd + "; exec bash -l"}

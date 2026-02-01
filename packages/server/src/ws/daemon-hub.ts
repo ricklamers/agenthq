@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { DaemonToServerMessage, ServerToDaemonMessage } from '@agenthq/shared';
 import { WS_DAEMON_PATH } from '@agenthq/shared';
-import { envStore, processStore, worktreeStore } from '../state/index.js';
+import { envStore, processStore, worktreeStore, repoStore, configStore } from '../state/index.js';
 import { browserHub } from './browser-hub.js';
 
 // Helper to decode base64 to string
@@ -33,15 +33,19 @@ class DaemonHub {
 
     switch (message.type) {
       case 'register': {
-        envId = message.envId;
-        envStore.register({
-          id: message.envId,
-          name: message.envName,
-          capabilities: message.capabilities,
+        // Register returns the matched config ID
+        envId = envStore.register(
+          message.envId,
+          message.envName,
+          message.capabilities,
           ws,
-        });
-        console.log(`Daemon registered: ${message.envName} (${message.envId})`);
+          message.workspace
+        );
+        console.log(`Daemon registered: ${message.envName} -> env ${envId}`);
         browserHub.broadcastEnvUpdate();
+        
+        // Request repos list from daemon
+        this.sendToEnv(envId, { type: 'list-repos' });
         break;
       }
 
@@ -112,6 +116,17 @@ class DaemonHub {
         }
         break;
       }
+
+      case 'repos-list': {
+        if (envId && message.repos) {
+          // Store repos for this environment (skip for local - it reads from filesystem)
+          if (envId !== 'local') {
+            repoStore.setEnvRepos(envId, message.repos);
+          }
+          console.log(`Received ${message.repos.length} repos from env ${envId}`);
+        }
+        break;
+      }
     }
 
     return envId;
@@ -140,8 +155,21 @@ export const daemonHub = new DaemonHub();
 
 export function registerDaemonWs(app: FastifyInstance): void {
   app.register(async (fastify) => {
-    fastify.get(WS_DAEMON_PATH, { websocket: true }, (socket) => {
-      console.log('Daemon WebSocket connected');
+    fastify.get<{ Querystring: { token?: string } }>(WS_DAEMON_PATH, { websocket: true }, (socket, request) => {
+      const providedToken = request.query.token;
+      const expectedToken = configStore.getDaemonAuthToken();
+      
+      // If a daemon auth token is configured, verify it
+      // Local daemons (from localhost) can connect without token
+      const isLocalConnection = request.ip === '127.0.0.1' || request.ip === '::1' || request.ip === '::ffff:127.0.0.1';
+      
+      if (expectedToken && !isLocalConnection && providedToken !== expectedToken) {
+        console.log(`Daemon connection rejected: invalid token from ${request.ip}`);
+        socket.close(4001, 'Invalid auth token');
+        return;
+      }
+      
+      console.log(`Daemon WebSocket connected from ${request.ip} (local: ${isLocalConnection})`);
       let envId: string | null = null;
 
       socket.on('message', (data) => {

@@ -1,12 +1,21 @@
 // Split terminal container with VS Code-style pane arrangement
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import type { Process, Worktree } from '@agenthq/shared';
+import type { Process, Worktree, AgentType } from '@agenthq/shared';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './ui/resizable';
 import { TerminalPane, type TerminalPaneHandle } from './TerminalPane';
 import { Button } from './ui/button';
 import { Plus, X, Circle, SplitSquareHorizontal, SplitSquareVertical, GitCompare, GitMerge, Archive, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+// Agent options for merge (only agents that support yolo mode / actually do coding)
+const MERGE_AGENT_OPTIONS: { value: AgentType; label: string }[] = [
+  { value: 'claude-code', label: 'Claude Code' },
+  { value: 'codex-cli', label: 'Codex CLI' },
+  { value: 'cursor-agent', label: 'Cursor Agent' },
+  { value: 'droid-cli', label: 'Droid CLI' },
+  { value: 'kimi-cli', label: 'Kimi CLI' },
+];
 
 // Types for the pane layout tree
 export type PaneNode =
@@ -33,7 +42,7 @@ interface SplitTerminalContainerProps {
   onArchiveWorktree: () => void;
   onViewDiff: () => Promise<string | null>;
   onMerge: () => Promise<string | null>;
-  onMergeWithAgent: () => Promise<string | null>;
+  onMergeWithAgent: (agent: AgentType) => Promise<string | null>;
 }
 
 export interface SplitTerminalContainerHandle {
@@ -104,6 +113,9 @@ export function SplitTerminalContainer({
   // Track layout changes to trigger resize
   const [layoutVersion, setLayoutVersion] = useState(0);
   
+  // Agent merge dialog state
+  const [showAgentMergeDialog, setShowAgentMergeDialog] = useState(false);
+  
   // Refs for terminal panes
   const paneRefs = useRef<Map<string, TerminalPaneHandle>>(new Map());
   
@@ -119,6 +131,60 @@ export function SplitTerminalContainer({
       });
     }, 50);
   }, []);
+
+  // Count terminal panes in layout (moved up for use in useEffect)
+  const countPanes = useCallback((node: PaneNode): number => {
+    if (node.type === 'terminal') return 1;
+    return countPanes(node.children[0]) + countPanes(node.children[1]);
+  }, []);
+
+  const paneCount = countPanes(layout);
+
+  // Close a pane (remove from split) - moved up for use in Ctrl+W handler
+  const closePane = useCallback((paneId: string) => {
+    const removePane = (node: PaneNode): PaneNode | null => {
+      if (node.type === 'terminal') {
+        return node.id === paneId ? null : node;
+      }
+      
+      const [left, right] = node.children;
+      
+      // Check if one of the children is the pane to remove
+      if (left.type === 'terminal' && left.id === paneId) {
+        return right;
+      }
+      if (right.type === 'terminal' && right.id === paneId) {
+        return left;
+      }
+      
+      // Recursively process children
+      const newLeft = removePane(left);
+      const newRight = removePane(right);
+      
+      if (newLeft === null) return newRight;
+      if (newRight === null) return newLeft;
+      
+      return { ...node, children: [newLeft, newRight] };
+    };
+    
+    const newLayout = removePane(layout) ?? { type: 'terminal', id: generatePaneId(), processId: null };
+    
+    // Clear any process assignments for this pane
+    const newAssignments = new Map(processAssignments);
+    for (const [processId, assignedPane] of processAssignments) {
+      if (assignedPane === paneId) {
+        newAssignments.delete(processId);
+      }
+    }
+    
+    // Update layout and assignments in a single state update
+    updateState({
+      layout: newLayout,
+      processAssignments: newAssignments,
+    });
+    
+    setLayoutVersion(v => v + 1);
+  }, [layout, processAssignments, updateState]);
 
   // Keyboard shortcut: Ctrl+W to close current tab
   useEffect(() => {
@@ -179,8 +245,8 @@ export function SplitTerminalContainer({
     prevProcessIdsRef.current = currentProcessIds;
     
     // Auto-assign the first new process to the focused pane
-    if (newProcesses.length > 0) {
-      const newProcess = newProcesses[0];
+    const newProcess = newProcesses[0];
+    if (newProcess) {
       setProcessAssignments(prev => {
         // Double-check the process isn't already assigned (might have changed)
         if (prev.has(newProcess.id)) return prev;
@@ -266,52 +332,6 @@ export function SplitTerminalContainer({
     setLayoutVersion(v => v + 1);
   }, [layout, updateState]);
 
-  // Close a pane (remove from split)
-  const closePane = useCallback((paneId: string) => {
-    const removePane = (node: PaneNode): PaneNode | null => {
-      if (node.type === 'terminal') {
-        return node.id === paneId ? null : node;
-      }
-      
-      const [left, right] = node.children;
-      
-      // Check if one of the children is the pane to remove
-      if (left.type === 'terminal' && left.id === paneId) {
-        return right;
-      }
-      if (right.type === 'terminal' && right.id === paneId) {
-        return left;
-      }
-      
-      // Recursively process children
-      const newLeft = removePane(left);
-      const newRight = removePane(right);
-      
-      if (newLeft === null) return newRight;
-      if (newRight === null) return newLeft;
-      
-      return { ...node, children: [newLeft, newRight] };
-    };
-    
-    const newLayout = removePane(layout) ?? { type: 'terminal', id: generatePaneId(), processId: null };
-    
-    // Clear any process assignments for this pane
-    const newAssignments = new Map(processAssignments);
-    for (const [processId, assignedPane] of processAssignments) {
-      if (assignedPane === paneId) {
-        newAssignments.delete(processId);
-      }
-    }
-    
-    // Update layout and assignments in a single state update
-    updateState({
-      layout: newLayout,
-      processAssignments: newAssignments,
-    });
-    
-    setLayoutVersion(v => v + 1);
-  }, [layout, processAssignments, updateState]);
-
   // Handle drop on pane
   const handleDrop = useCallback((paneId: string) => {
     if (draggedProcessId) {
@@ -325,14 +345,6 @@ export function SplitTerminalContainer({
       }, 50);
     }
   }, [draggedProcessId, assignProcessToPane, setFocusedPaneId]);
-
-  // Count terminal panes in layout
-  const countPanes = useCallback((node: PaneNode): number => {
-    if (node.type === 'terminal') return 1;
-    return countPanes(node.children[0]) + countPanes(node.children[1]);
-  }, []);
-
-  const paneCount = countPanes(layout);
 
   // Render a pane node recursively
   const renderPaneNode = (node: PaneNode): React.ReactNode => {
@@ -575,10 +587,13 @@ export function SplitTerminalContainer({
               <GitMerge className="h-4 w-4" />
               Merge
             </Button>
-            <Button variant="ghost" size="sm" className="gap-1" onClick={async () => {
-              const processId = await onMergeWithAgent();
-              if (processId) setPendingSelectProcessId(processId);
-            }} title="Use AI agent to resolve merge conflicts">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1"
+              onClick={() => setShowAgentMergeDialog(true)}
+              title="Use AI agent to resolve merge conflicts"
+            >
               <Bot className="h-4 w-4" />
               Agent Merge
             </Button>
@@ -591,6 +606,36 @@ export function SplitTerminalContainer({
               <Archive className="h-4 w-4" />
               Archive Worktree
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Agent Merge Dialog */}
+      {showAgentMergeDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6">
+            <h2 className="mb-4 text-lg font-semibold">Select Agent for Merge</h2>
+            <div className="grid grid-cols-2 gap-2">
+              {MERGE_AGENT_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={async () => {
+                    setShowAgentMergeDialog(false);
+                    const processId = await onMergeWithAgent(option.value);
+                    if (processId) setPendingSelectProcessId(processId);
+                  }}
+                  className="flex flex-col items-start rounded-lg border border-input bg-background px-3 py-2.5 text-left transition-colors hover:border-primary hover:bg-primary/10"
+                >
+                  <span className="font-medium text-sm">{option.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-end">
+              <Button variant="outline" onClick={() => setShowAgentMergeDialog(false)}>
+                Cancel
+              </Button>
+            </div>
           </div>
         </div>
       )}

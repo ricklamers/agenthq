@@ -25,20 +25,23 @@ class WorktreeStore {
   /**
    * Register main worktree for a repo (doesn't create git worktree)
    */
-  registerMain(repoName: string, repoPath: string, branch: string): Worktree {
-    // Check if main worktree already exists for this repo
-    const existing = this.getByRepoName(repoName).find((w) => w.isMain);
+  registerMain(repoName: string, repoPath: string, branch: string, envId?: string): Worktree {
+    // Include envId in the key to allow same repo name in different environments
+    const id = envId && envId !== 'local' ? `main-${envId}-${repoName}` : `main-${repoName}`;
+    
+    // Check if main worktree already exists
+    const existing = this.worktrees.get(id);
     if (existing) {
       return existing;
     }
 
-    const id = `main-${repoName}`;
     const worktree: Worktree = {
       id,
       repoName,
       path: repoPath,
       branch,
       isMain: true,
+      envId,
       createdAt: Date.now(),
     };
     this.worktrees.set(id, worktree);
@@ -59,6 +62,12 @@ class WorktreeStore {
 
   getByEnv(envId: string): Worktree[] {
     return Array.from(this.worktrees.values()).filter((w) => w.envId === envId);
+  }
+
+  getByRepoNameAndEnv(repoName: string, envId?: string): Worktree[] {
+    return Array.from(this.worktrees.values()).filter((w) => 
+      w.repoName === repoName && w.envId === envId
+    );
   }
 
   updatePath(worktreeId: string, path: string): Worktree | undefined {

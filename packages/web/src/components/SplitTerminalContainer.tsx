@@ -1,6 +1,6 @@
 // Split terminal container with VS Code-style pane arrangement
 
-import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Process, Worktree } from '@agenthq/shared';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './ui/resizable';
 import { TerminalPane, type TerminalPaneHandle } from './TerminalPane';
@@ -106,6 +106,9 @@ export function SplitTerminalContainer({
   
   // Refs for terminal panes
   const paneRefs = useRef<Map<string, TerminalPaneHandle>>(new Map());
+  
+  // Track previous process IDs to detect newly created processes
+  const prevProcessIdsRef = useRef<Set<string>>(new Set());
 
   // Fit all terminal panes after layout changes
   const fitAllPanes = useCallback(() => {
@@ -158,24 +161,29 @@ export function SplitTerminalContainer({
     return null;
   }, [processAssignments, processes]);
 
-  // Get unassigned processes (not shown in any pane)
-  const unassignedProcesses = useMemo(() => {
-    return processes.filter(p => !processAssignments.has(p.id));
-  }, [processes, processAssignments]);
-
-  // Auto-assign first unassigned process to focused pane (always selects new tabs)
-  // Only runs when not dragging to avoid race conditions
-  const firstUnassigned = unassignedProcesses[0];
-  
+  // Auto-assign newly created processes to focused pane
+  // Only triggers for processes that didn't exist before (not just unassigned)
   useEffect(() => {
     // Don't auto-assign while dragging - let the drag complete first
     if (draggedProcessId) return;
     
-    // Assign new unassigned process to the focused pane
-    if (firstUnassigned) {
+    const currentProcessIds = new Set(processes.map(p => p.id));
+    const prevProcessIds = prevProcessIdsRef.current;
+    
+    // Find truly new processes (just created, not previously existing)
+    const newProcesses = processes.filter(p => 
+      !prevProcessIds.has(p.id) && !processAssignments.has(p.id)
+    );
+    
+    // Update the ref for next time
+    prevProcessIdsRef.current = currentProcessIds;
+    
+    // Auto-assign the first new process to the focused pane
+    if (newProcesses.length > 0) {
+      const newProcess = newProcesses[0];
       setProcessAssignments(prev => {
         // Double-check the process isn't already assigned (might have changed)
-        if (prev.has(firstUnassigned.id)) return prev;
+        if (prev.has(newProcess.id)) return prev;
         
         const next = new Map(prev);
         // Remove any existing process from the focused pane
@@ -184,11 +192,11 @@ export function SplitTerminalContainer({
             next.delete(pid);
           }
         }
-        next.set(firstUnassigned.id, focusedPaneId);
+        next.set(newProcess.id, focusedPaneId);
         return next;
       });
     }
-  }, [focusedPaneId, firstUnassigned, draggedProcessId, setProcessAssignments]);
+  }, [processes, focusedPaneId, draggedProcessId, processAssignments, setProcessAssignments]);
 
   // Assign process to pane
   const assignProcessToPane = useCallback((processId: string, paneId: string) => {

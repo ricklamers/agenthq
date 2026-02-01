@@ -232,81 +232,85 @@ export function SplitTerminalContainer({
   const splitPane = useCallback((paneId: string, direction: 'horizontal' | 'vertical') => {
     const newPaneId = generatePaneId();
     
-    setLayout(prev => {
-      const splitNode = (node: PaneNode): PaneNode => {
-        if (node.type === 'terminal' && node.id === paneId) {
-          return {
-            type: 'split',
-            id: generatePaneId(),
-            direction,
-            children: [
-              node,
-              { type: 'terminal', id: newPaneId, processId: null },
-            ],
-            sizes: [50, 50],
-          };
-        }
-        if (node.type === 'split') {
-          return {
-            ...node,
-            children: [splitNode(node.children[0]), splitNode(node.children[1])],
-          };
-        }
-        return node;
-      };
-      return splitNode(prev);
+    const splitNode = (node: PaneNode): PaneNode => {
+      if (node.type === 'terminal' && node.id === paneId) {
+        return {
+          type: 'split',
+          id: generatePaneId(),
+          direction,
+          children: [
+            node,
+            { type: 'terminal', id: newPaneId, processId: null },
+          ],
+          sizes: [50, 50],
+        };
+      }
+      if (node.type === 'split') {
+        return {
+          ...node,
+          children: [splitNode(node.children[0]), splitNode(node.children[1])],
+        };
+      }
+      return node;
+    };
+    
+    const newLayout = splitNode(layout);
+    
+    // Update both layout and focusedPaneId in a single state update
+    // to avoid race condition where second update overwrites first
+    updateState({
+      layout: newLayout,
+      focusedPaneId: newPaneId,
     });
     
-    setFocusedPaneId(newPaneId);
     setLayoutVersion(v => v + 1);
-  }, [setLayout, setFocusedPaneId]);
+  }, [layout, updateState]);
 
   // Close a pane (remove from split)
   const closePane = useCallback((paneId: string) => {
-    setLayout(prev => {
-      const removePane = (node: PaneNode): PaneNode | null => {
-        if (node.type === 'terminal') {
-          return node.id === paneId ? null : node;
-        }
-        
-        const [left, right] = node.children;
-        
-        // Check if one of the children is the pane to remove
-        if (left.type === 'terminal' && left.id === paneId) {
-          return right;
-        }
-        if (right.type === 'terminal' && right.id === paneId) {
-          return left;
-        }
-        
-        // Recursively process children
-        const newLeft = removePane(left);
-        const newRight = removePane(right);
-        
-        if (newLeft === null) return newRight;
-        if (newRight === null) return newLeft;
-        
-        return { ...node, children: [newLeft, newRight] };
-      };
+    const removePane = (node: PaneNode): PaneNode | null => {
+      if (node.type === 'terminal') {
+        return node.id === paneId ? null : node;
+      }
       
-      const result = removePane(prev);
-      // Always keep at least one pane
-      return result ?? { type: 'terminal', id: generatePaneId(), processId: null };
-    });
+      const [left, right] = node.children;
+      
+      // Check if one of the children is the pane to remove
+      if (left.type === 'terminal' && left.id === paneId) {
+        return right;
+      }
+      if (right.type === 'terminal' && right.id === paneId) {
+        return left;
+      }
+      
+      // Recursively process children
+      const newLeft = removePane(left);
+      const newRight = removePane(right);
+      
+      if (newLeft === null) return newRight;
+      if (newRight === null) return newLeft;
+      
+      return { ...node, children: [newLeft, newRight] };
+    };
+    
+    const newLayout = removePane(layout) ?? { type: 'terminal', id: generatePaneId(), processId: null };
     
     // Clear any process assignments for this pane
-    setProcessAssignments(prev => {
-      const next = new Map(prev);
-      for (const [processId, assignedPane] of prev) {
-        if (assignedPane === paneId) {
-          next.delete(processId);
-        }
+    const newAssignments = new Map(processAssignments);
+    for (const [processId, assignedPane] of processAssignments) {
+      if (assignedPane === paneId) {
+        newAssignments.delete(processId);
       }
-      return next;
+    }
+    
+    // Update layout and assignments in a single state update
+    updateState({
+      layout: newLayout,
+      processAssignments: newAssignments,
     });
     
     setLayoutVersion(v => v + 1);
-  }, [setLayout, setProcessAssignments]);
+  }, [layout, processAssignments, updateState]);
 
   // Handle drop on pane
   const handleDrop = useCallback((paneId: string) => {
@@ -463,8 +467,10 @@ export function SplitTerminalContainer({
             const isFocusedProcess = assignedPane === focusedPaneId;
             
             return (
-              <button
+              <div
                 key={process.id}
+                role="button"
+                tabIndex={0}
                 draggable
                 onDragStart={(e) => {
                   setDraggedProcessId(process.id);
@@ -475,6 +481,12 @@ export function SplitTerminalContainer({
                 onClick={() => {
                   // Assign to focused pane on click
                   assignProcessToPane(process.id, focusedPaneId);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    assignProcessToPane(process.id, focusedPaneId);
+                  }
                 }}
                 className={cn(
                   'group flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm transition-colors cursor-grab active:cursor-grabbing',
@@ -509,7 +521,7 @@ export function SplitTerminalContainer({
                 >
                   <X className="h-3 w-3" />
                 </button>
-              </button>
+              </div>
             );
           })}
 

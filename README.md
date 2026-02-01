@@ -4,7 +4,7 @@ Browser-based control plane for managing coding agents (Claude Code, Codex CLI, 
 
 <img width="3451" height="1990" alt="image" src="https://github.com/user-attachments/assets/8a917cbb-2fc0-49b8-8a0f-71a63710bde6" />
 
-[Watch the demo video](https://x.com/RickLamers/status/2018084764285382851)
+▶️ [**See it in action**](https://x.com/RickLamers/status/2018084764285382851)
 
 ## Quick Start
 

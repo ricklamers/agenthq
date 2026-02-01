@@ -10,10 +10,13 @@ export const HEARTBEAT_TIMEOUT_MS = 90_000;
 export const WS_DAEMON_PATH = '/ws/daemon';
 export const WS_BROWSER_PATH = '/ws/browser';
 
-// Agent CLI commands
+// Agent CLI commands (should match daemon/internal/protocol/messages.go AgentCommands)
 export const AGENT_COMMANDS: Record<string, string> = {
   'claude-code': 'claude',
   'codex-cli': 'codex',
   'cursor-agent': 'cursor-agent',
+  'kimi-cli': 'kimi',
+  'droid-cli': 'droid',
   bash: 'bash',
+  shell: 'bash',
 };

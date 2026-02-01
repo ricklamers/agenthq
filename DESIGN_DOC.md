@@ -63,11 +63,26 @@ This prevents screen tearing during rapid output from coding agents. Requires **
 
 ## Configuration
 
+### Server Environment Variables
+
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `AGENTHQ_WORKSPACE` | Yes | Path to workspace folder containing repos. Exit if not set. |
 | `AGENTHQ_PORT` | No | Server port (default: 3000) |
-| `AGENTHQ_SERVER_URL` | Yes (daemon) | URL daemon connects to |
+
+### Daemon Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AGENTHQ_SERVER_URL` | Yes | WebSocket URL to connect to (e.g. `ws://localhost:3000/ws/daemon`) |
+| `AGENTHQ_ENV_ID` | No | Environment ID (auto-generated if not set) |
+| `AGENTHQ_AUTH_TOKEN` | No | Auth token for remote daemon connections |
+
+### Daemon CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `--workspace` | Path to workspace folder (required for remote daemons) |
 
 ## Data Model
 
@@ -201,66 +216,104 @@ Main worktree (the repo root) is always available — no need to create a worktr
 
 | Direction | Type | Payload |
 |-----------|------|---------|
-| D→S | `register` | `{ envId, envName, capabilities: string[], repoPath }` |
+| D→S | `register` | `{ envId, envName, capabilities[], workspace? }` |
 | D→S | `heartbeat` | `{}` |
-| D→S | `pty-data` | `{ processId, data: bytes (compressed) }` |
+| D→S | `pty-data` | `{ processId, data }` |
 | D→S | `buffer-clear` | `{ processId }` |
+| D→S | `process-started` | `{ processId }` |
 | D→S | `process-exit` | `{ processId, exitCode }` |
 | D→S | `branch-changed` | `{ worktreeId, branch }` |
 | D→S | `worktree-ready` | `{ worktreeId, path, branch }` |
-| S→D | `create-worktree` | `{ worktreeId, repoName }` |
-| S→D | `spawn` | `{ processId, worktreeId, agent, args, task }` |
+| D→S | `repos-list` | `{ repos: [{ name, path, defaultBranch }] }` |
+| S→D | `create-worktree` | `{ worktreeId, repoName, repoPath }` |
+| S→D | `spawn` | `{ processId, worktreeId, worktreePath, agent, args[], task?, cols?, rows?, yoloMode? }` |
 | S→D | `pty-input` | `{ processId, data }` |
 | S→D | `resize` | `{ processId, cols, rows }` |
 | S→D | `kill` | `{ processId }` |
-| S→D | `remove-worktree` | `{ worktreeId }` |
+| S→D | `remove-worktree` | `{ worktreeId, worktreePath }` |
+| S→D | `list-repos` | `{}` |
 
 ### Browser ↔ Server (WebSocket)
 
 | Direction | Type | Payload |
 |-----------|------|---------|
-| B→S | `attach` | `{ processId }` |
+| B→S | `attach` | `{ processId, skipBuffer? }` |
 | B→S | `detach` | `{ processId }` |
 | B→S | `input` | `{ processId, data }` |
 | B→S | `resize` | `{ processId, cols, rows }` |
 | S→B | `pty-data` | `{ processId, data }` |
 | S→B | `process-update` | `{ process }` |
+| S→B | `process-removed` | `{ processId }` |
 | S→B | `worktree-update` | `{ worktree }` |
-| S→B | `env-update` | `{ environments }` |
+| S→B | `worktree-removed` | `{ worktreeId }` |
+| S→B | `env-update` | `{ environments[] }` |
+| S→B | `error` | `{ message }` |
 
 ## HTTP API
 
+### Repos
+
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/repos` | List repos in workspace |
-| POST | `/api/repos` | Clone repo `{ url }` |
-| DELETE | `/api/repos/:name` | Remove repo |
-| GET | `/api/repos/:name` | Repo details + worktrees |
-| POST | `/api/repos/:name/worktrees` | Create worktree `{ envId }` |
+| GET | `/api/repos?envId=` | List repos (optionally filtered by env) |
+| POST | `/api/repos` | Clone repo `{ url }` (stub) |
+| GET | `/api/repos/:name?envId=` | Repo details |
+| DELETE | `/api/repos/:name` | Remove repo (stub) |
+
+### Worktrees
+
+| Method | Path | Description |
+|--------|------|-------------|
 | GET | `/api/worktrees` | List all worktrees |
 | GET | `/api/worktrees/:id` | Worktree details + processes |
+| POST | `/api/repos/:name/worktrees` | Create worktree `{ envId }` |
 | DELETE | `/api/worktrees/:id` | Archive worktree (kills processes, removes) |
-| POST | `/api/worktrees/:id/diff` | Run diff command |
-| POST | `/api/worktrees/:id/merge` | Merge into base branch |
-| POST | `/api/worktrees/:id/processes` | Spawn process `{ agent, task, envId }` |
+| POST | `/api/worktrees/:id/diff` | Run diff command (spawns shell process) |
+| POST | `/api/worktrees/:id/merge` | Merge into main branch |
+| POST | `/api/worktrees/:id/merge-with-agent` | Merge with agent conflict resolution `{ agent? }` |
+
+### Processes
+
+| Method | Path | Description |
+|--------|------|-------------|
 | GET | `/api/processes` | List all processes |
 | GET | `/api/processes/:id` | Process details |
-| DELETE | `/api/processes/:id` | Kill process |
-| GET | `/api/environments` | List connected daemons |
+| POST | `/api/worktrees/:id/processes` | Spawn process `{ agent, task?, envId, cols?, rows?, yoloMode? }` |
+| DELETE | `/api/processes/:id?remove=` | Kill process (or remove if `?remove=true`) |
+
+### Environments
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/environments` | List all environments |
+| GET | `/api/environments/:envId` | Get environment |
+| POST | `/api/environments` | Create exe.dev environment `{ name, vmName }` |
+| DELETE | `/api/environments/:envId` | Delete environment (destroys VM for exe type) |
+| POST | `/api/environments/:envId/provision` | Provision exe.dev environment (upload daemon, create workspace) |
+| POST | `/api/environments/:envId/update-daemon` | Update daemon on exe.dev environment |
+| POST | `/api/environments/:envId/restart` | Restart daemon |
+
+### Config
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/config` | Get config (tokens masked) |
+| POST | `/api/config/sprites-token` | Set sprites token `{ token }` |
+| POST | `/api/config/server-url` | Set server public URL `{ url }` |
+| POST | `/api/config/daemon-auth-token` | Set daemon auth token `{ token }` |
 
 ## Supported Agents
 
-| Agent | CLI Command | Status |
-|-------|-------------|--------|
-| Claude Code | `claude` | Initial support |
-| Codex CLI | `codex` | Initial support |
-| Kimi CLI | `kimi` | Initial support |
+| Agent | CLI Command | Yolo Mode | Status |
+|-------|-------------|-----------|--------|
+| Claude Code | `claude` | Yes | Supported |
+| Codex CLI | `codex` | Yes | Supported |
+| Cursor Agent | `cursor-agent` | Yes | Supported |
+| Kimi CLI | `kimi` | Yes | Supported |
+| Droid CLI | `droid` | No | Supported |
+| Terminal | `bash` / `shell` | No | Supported |
 
-**TODO**: Figure out how to pass initial prompt/task to each agent CLI on startup. Options:
-- CLI flags (if supported)
-- Piping initial input
-- Config file injection
-- Wrapper script
+Tasks are passed via the `task` field in the spawn message. For shell agents, the task is executed as a command. For coding agents, it's passed as the initial prompt.
 
 ## UI/UX
 
@@ -420,41 +473,86 @@ daemon/ ◀──codegen (optional)── @agenthq/shared
 
 ```typescript
 // packages/shared/src/types.ts
+type AgentType = 'claude-code' | 'codex-cli' | 'cursor-agent' | 'kimi-cli' | 'droid-cli' | 'bash' | 'shell';
+type ProcessStatus = 'pending' | 'running' | 'stopped' | 'error';
+type EnvironmentType = 'local' | 'exe';
+type EnvironmentStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
 interface Worktree {
   id: string;
   repoName: string;
   path: string;
   branch: string;
   isMain: boolean;
+  envId?: string;
   createdAt: number;
 }
 
 interface Process {
   id: string;
   worktreeId: string;
-  agent: AgentType;  // 'claude-code' | 'codex-cli' | 'bash'
-  status: ProcessStatus;  // 'pending' | 'running' | 'stopped' | 'error'
+  agent: AgentType;
+  status: ProcessStatus;
   envId: string;
   createdAt: number;
   exitCode?: number;
 }
 
+interface Environment {
+  id: string;
+  name: string;
+  type: EnvironmentType;
+  status: EnvironmentStatus;
+  capabilities: string[];
+  connectedAt?: number;
+  lastHeartbeat?: number;
+  vmName?: string;      // exe.dev
+  vmSshDest?: string;   // exe.dev
+  workspace?: string;
+}
+
+interface Repo {
+  name: string;
+  path: string;
+  defaultBranch: string;
+  envId?: string;
+}
+
 // packages/shared/src/protocol.ts
-export type DaemonMessage =
-  | { type: 'register'; envId: string; capabilities: string[] }
+export type DaemonToServerMessage =
+  | { type: 'register'; envId: string; envName: string; capabilities: string[]; workspace?: string }
+  | { type: 'heartbeat' }
   | { type: 'pty-data'; processId: string; data: string }
+  | { type: 'buffer-clear'; processId: string }
+  | { type: 'process-started'; processId: string }
   | { type: 'process-exit'; processId: string; exitCode: number }
   | { type: 'worktree-ready'; worktreeId: string; path: string; branch: string }
-  // ...
+  | { type: 'branch-changed'; worktreeId: string; branch: string }
+  | { type: 'repos-list'; repos: Array<{ name: string; path: string; defaultBranch: string }> };
 
-export type ServerMessage =
-  | { type: 'create-worktree'; worktreeId: string; repoName: string }
-  | { type: 'spawn'; processId: string; worktreeId: string; agent: string; args: string[] }
+export type ServerToDaemonMessage =
+  | { type: 'create-worktree'; worktreeId: string; repoName: string; repoPath: string }
+  | { type: 'spawn'; processId: string; worktreeId: string; worktreePath: string; agent: AgentType; args: string[]; task?: string; cols?: number; rows?: number; yoloMode?: boolean }
   | { type: 'pty-input'; processId: string; data: string }
-  // ...
+  | { type: 'resize'; processId: string; cols: number; rows: number }
+  | { type: 'kill'; processId: string }
+  | { type: 'remove-worktree'; worktreeId: string; worktreePath: string }
+  | { type: 'list-repos' };
 
-export type BrowserMessage = // ...
-export type BrowserServerMessage = // ...
+export type BrowserToServerMessage =
+  | { type: 'attach'; processId: string; skipBuffer?: boolean }
+  | { type: 'detach'; processId: string }
+  | { type: 'input'; processId: string; data: string }
+  | { type: 'resize'; processId: string; cols: number; rows: number };
+
+export type ServerToBrowserMessage =
+  | { type: 'pty-data'; processId: string; data: string }
+  | { type: 'process-update'; process: Process }
+  | { type: 'process-removed'; processId: string }
+  | { type: 'worktree-update'; worktree: Worktree }
+  | { type: 'worktree-removed'; worktreeId: string }
+  | { type: 'env-update'; environments: Environment[] }
+  | { type: 'error'; message: string };
 ```
 
 ### TypeScript Config
@@ -484,37 +582,58 @@ agenthq/
 │   │   ├── src/
 │   │   │   ├── index.ts
 │   │   │   ├── api/
+│   │   │   │   ├── index.ts
+│   │   │   │   ├── config.ts
+│   │   │   │   ├── environments.ts
+│   │   │   │   ├── processes.ts
 │   │   │   │   ├── repos.ts
-│   │   │   │   ├── worktrees.ts
-│   │   │   │   └── processes.ts
+│   │   │   │   └── worktrees.ts
 │   │   │   ├── ws/
+│   │   │   │   ├── index.ts
 │   │   │   │   ├── daemon-hub.ts
 │   │   │   │   └── browser-hub.ts
-│   │   │   └── state/
-│   │   │       ├── worktree-store.ts
-│   │   │       ├── process-store.ts
-│   │   │       └── repo-store.ts
+│   │   │   ├── state/
+│   │   │   │   ├── index.ts
+│   │   │   │   ├── config-store.ts
+│   │   │   │   ├── env-store.ts
+│   │   │   │   ├── process-store.ts
+│   │   │   │   ├── repo-store.ts
+│   │   │   │   └── worktree-store.ts
+│   │   │   └── services/
+│   │   │       ├── index.ts
+│   │   │       ├── exe-client.ts
+│   │   │       └── sprites-client.ts
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   │
 │   ├── web/                # @agenthq/web
 │   │   ├── src/
 │   │   │   ├── App.tsx
+│   │   │   ├── main.tsx
+│   │   │   ├── index.css
 │   │   │   ├── components/
-│   │   │   │   ├── ui/     # shadcn components
+│   │   │   │   ├── ui/           # shadcn components
+│   │   │   │   ├── ConfirmDialog.tsx
+│   │   │   │   ├── SettingsPage.tsx
 │   │   │   │   ├── Sidebar.tsx
-│   │   │   │   ├── TabBar.tsx
-│   │   │   │   └── TerminalPanel.tsx
+│   │   │   │   ├── SpawnDialog.tsx
+│   │   │   │   ├── SplitTerminalContainer.tsx
+│   │   │   │   └── TerminalPane.tsx
 │   │   │   ├── hooks/
+│   │   │   │   ├── index.ts
+│   │   │   │   ├── useTerminal.ts
+│   │   │   │   └── useWebSocket.ts
 │   │   │   └── lib/
+│   │   │       └── utils.ts
 │   │   ├── package.json
 │   │   └── vite.config.ts
 │   │
 │   └── shared/             # @agenthq/shared
 │       ├── src/
+│       │   ├── index.ts
+│       │   ├── types.ts
 │       │   ├── protocol.ts
-│       │   ├── constants.ts
-│       │   └── index.ts
+│       │   └── constants.ts
 │       ├── package.json
 │       └── tsconfig.json
 │
@@ -523,15 +642,22 @@ agenthq/
 │   │   └── agenthq-daemon/
 │   │       └── main.go
 │   ├── internal/
+│   │   ├── client/
+│   │   │   └── client.go
+│   │   ├── protocol/
+│   │   │   └── messages.go
 │   │   ├── pty/
-│   │   ├── worktree/
-│   │   ├── deps/
-│   │   └── protocol/
+│   │   │   └── pty.go
+│   │   └── session/
+│   │       └── manager.go
 │   ├── Makefile
-│   └── go.mod
+│   ├── go.mod
+│   └── go.sum
 │
-├── package.json            # Root scripts
+├── Makefile                # Development commands
+├── package.json            # Root workspace config
 ├── pnpm-workspace.yaml
+├── AGENTS.md               # Agent instructions
 ├── DESIGN_DOC.md
 └── README.md
 ```
@@ -541,6 +667,22 @@ agenthq/
 - Multi-user / authentication
 - Private repo cloning
 - Remote push / PR creation
-- Sprites.dev integration
 - Windows daemon builds
 - Preview URLs / port forwarding (architecture should support adding this later — daemon can expose worktree dev servers via tunneled ports)
+
+## Implemented Extensions
+
+### exe.dev Integration
+
+Remote environments via exe.dev VMs are supported:
+- Create/destroy VMs via `exe` CLI
+- Provision daemons remotely (upload binary, create workspace, start daemon)
+- Update daemons on running VMs
+- Environments tracked per-repo and per-worktree
+
+### Multi-Environment Support
+
+- Local daemon auto-connects on startup
+- Remote daemons (exe.dev) connect with auth tokens
+- Environment selector in UI to switch contexts
+- Repos and worktrees are environment-scoped

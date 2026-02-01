@@ -1,6 +1,6 @@
 # Agent HQ
 
-Browser-based control plane for managing coding agents (Claude Code, Codex CLI, etc.) across multiple environments.
+Browser-based control plane for managing coding agents (Claude Code, Codex CLI, Cursor Agent, etc.) across multiple environments.
 
 ## Quick Start
 
@@ -23,17 +23,41 @@ pnpm --filter @agenthq/shared build
 cd daemon && make build && cd ..
 ```
 
-### Development
+### Development (Recommended)
 
-Create a test workspace directory:
+Use the Makefile for managing all services:
 
 ```bash
+# Create test workspace
 mkdir -p /tmp/agenthq-test
 cd /tmp/agenthq-test
-git clone https://github.com/some/repo  # clone a test repo
+git init --initial-branch=main my-project
+cd my-project && echo "# Test" > README.md && git add . && git commit -m "init"
+cd ../..
+
+# Start all services
+make start WORKSPACE=/tmp/agenthq-test
+
+# Check status
+make status
+
+# View logs
+make tail-logs
+
+# Restart individual services
+make restart-daemon  # Rebuilds Go binary and restarts
+make restart-server  # Restarts Node server
+make restart-web     # Restarts Vite dev server
+
+# Stop everything
+make stop
 ```
 
-Start the server and web client:
+Open http://localhost:5173 in your browser.
+
+### Manual Development
+
+If you prefer manual control:
 
 ```bash
 # Terminal 1: Start server
@@ -44,15 +68,6 @@ pnpm --filter @agenthq/web dev
 
 # Terminal 3: Start daemon
 AGENTHQ_SERVER_URL=ws://localhost:3000/ws/daemon ./daemon/agenthq-daemon
-```
-
-Open http://localhost:5173 in your browser.
-
-### Combined Dev Mode
-
-```bash
-# Start server and web together
-AGENTHQ_WORKSPACE=/tmp/agenthq-test pnpm dev
 ```
 
 ## Architecture
@@ -92,11 +107,37 @@ agenthq/
 
 ## Environment Variables
 
+### Server
+
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `AGENTHQ_WORKSPACE` | Yes | Path to workspace folder containing repos |
 | `AGENTHQ_PORT` | No | Server port (default: 3000) |
-| `AGENTHQ_SERVER_URL` | Yes (daemon) | WebSocket URL daemon connects to |
+
+### Daemon
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AGENTHQ_SERVER_URL` | Yes | WebSocket URL to connect to |
+| `AGENTHQ_ENV_ID` | No | Environment ID (auto-generated if not set) |
+| `AGENTHQ_AUTH_TOKEN` | No | Auth token for remote connections |
+
+The daemon also accepts a `--workspace` flag for remote deployments:
+
+```bash
+./agenthq-daemon --workspace /path/to/workspace
+```
+
+## Supported Agents
+
+| Agent | Command | Description |
+|-------|---------|-------------|
+| Claude Code | `claude` | Anthropic coding agent |
+| Codex CLI | `codex` | OpenAI coding agent |
+| Cursor Agent | `cursor-agent` | Cursor coding agent |
+| Kimi CLI | `kimi` | Moonshot coding agent |
+| Droid CLI | `droid` | Factory AI coding agent |
+| Terminal | `bash` | Plain shell |
 
 ## License
 

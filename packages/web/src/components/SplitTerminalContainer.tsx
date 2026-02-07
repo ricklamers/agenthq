@@ -52,6 +52,7 @@ export interface SplitTerminalContainerHandle {
 // Generate unique IDs for panes
 let paneIdCounter = 0;
 const generatePaneId = () => `pane-${++paneIdCounter}`;
+const MOBILE_BREAKPOINT_QUERY = '(max-width: 767px)';
 
 // Helper to create default pane state
 export function createDefaultPaneState(): PaneLayoutState {
@@ -61,6 +62,19 @@ export function createDefaultPaneState(): PaneLayoutState {
     focusedPaneId: paneId,
     processAssignments: new Map(),
   };
+}
+
+function findPaneById(node: PaneNode, paneId: string): PaneNode | null {
+  if (node.type === 'terminal') {
+    return node.id === paneId ? node : null;
+  }
+
+  return findPaneById(node.children[0], paneId) ?? findPaneById(node.children[1], paneId);
+}
+
+function getFirstTerminalPaneId(node: PaneNode): string {
+  if (node.type === 'terminal') return node.id;
+  return getFirstTerminalPaneId(node.children[0]);
 }
 
 export function SplitTerminalContainer({
@@ -81,6 +95,23 @@ export function SplitTerminalContainer({
   // Use provided state or create default
   const currentState = paneState ?? createDefaultPaneState();
   const { layout, focusedPaneId, processAssignments } = currentState;
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia(MOBILE_BREAKPOINT_QUERY).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia(MOBILE_BREAKPOINT_QUERY);
+    const handleChange = (event: MediaQueryListEvent) => {
+      setIsMobile(event.matches);
+    };
+
+    setIsMobile(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
 
   // Helper to update state
   const updateState = useCallback((updates: Partial<PaneLayoutState>) => {
@@ -139,6 +170,12 @@ export function SplitTerminalContainer({
   }, []);
 
   const paneCount = countPanes(layout);
+  const focusedPane = findPaneById(layout, focusedPaneId);
+  const activePaneId = isMobile
+    ? focusedPane?.type === 'terminal'
+      ? focusedPane.id
+      : getFirstTerminalPaneId(layout)
+    : focusedPaneId;
 
   // Close a pane (remove from split) - moved up for use in Ctrl+W handler
   const closePane = useCallback((paneId: string) => {
@@ -194,7 +231,7 @@ export function SplitTerminalContainer({
         
         // Get process in focused pane
         for (const [processId, assignedPaneId] of processAssignments) {
-          if (assignedPaneId === focusedPaneId) {
+          if (assignedPaneId === activePaneId) {
             const process = processes.find(p => p.id === processId);
             if (process) {
               onKillProcess(processId);
@@ -207,7 +244,7 @@ export function SplitTerminalContainer({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [focusedPaneId, processAssignments, processes, onKillProcess]);
+  }, [activePaneId, processAssignments, processes, onKillProcess]);
 
   // Trigger fit when layout changes
   useEffect(() => {
@@ -254,15 +291,15 @@ export function SplitTerminalContainer({
         const next = new Map(prev);
         // Remove any existing process from the focused pane
         for (const [pid, assignedPane] of next) {
-          if (assignedPane === focusedPaneId) {
+          if (assignedPane === activePaneId) {
             next.delete(pid);
           }
         }
-        next.set(newProcess.id, focusedPaneId);
+        next.set(newProcess.id, activePaneId);
         return next;
       });
     }
-  }, [processes, focusedPaneId, draggedProcessId, processAssignments, setProcessAssignments]);
+  }, [processes, activePaneId, draggedProcessId, processAssignments, setProcessAssignments]);
 
   // Assign process to pane
   const assignProcessToPane = useCallback((processId: string, paneId: string) => {
@@ -289,10 +326,10 @@ export function SplitTerminalContainer({
     const pendingProcess = processes.find(p => p.id === pendingSelectProcessId);
     if (pendingProcess) {
       // Process arrived - assign to focused pane
-      assignProcessToPane(pendingSelectProcessId, focusedPaneId);
+      assignProcessToPane(pendingSelectProcessId, activePaneId);
       setPendingSelectProcessId(null);
     }
-  }, [pendingSelectProcessId, processes, focusedPaneId, assignProcessToPane]);
+  }, [pendingSelectProcessId, processes, activePaneId, assignProcessToPane]);
 
   // Split a pane
   const splitPane = useCallback((paneId: string, direction: 'horizontal' | 'vertical') => {
@@ -350,7 +387,7 @@ export function SplitTerminalContainer({
   const renderPaneNode = (node: PaneNode): React.ReactNode => {
     if (node.type === 'terminal') {
       const process = getProcessForPane(node.id);
-      const isFocused = focusedPaneId === node.id;
+      const isFocused = activePaneId === node.id;
       
       return (
         <div 
@@ -476,32 +513,36 @@ export function SplitTerminalContainer({
           {processes.map((process) => {
             const isAssigned = processAssignments.has(process.id);
             const assignedPane = processAssignments.get(process.id);
-            const isFocusedProcess = assignedPane === focusedPaneId;
+            const isFocusedProcess = assignedPane === activePaneId;
             
             return (
               <div
                 key={process.id}
                 role="button"
                 tabIndex={0}
-                draggable
+                draggable={!isMobile}
                 onDragStart={(e) => {
+                  if (isMobile) return;
                   setDraggedProcessId(process.id);
                   e.dataTransfer.effectAllowed = 'move';
                   e.dataTransfer.setData('text/plain', process.id);
                 }}
-                onDragEnd={() => setDraggedProcessId(null)}
+                onDragEnd={() => {
+                  if (!isMobile) setDraggedProcessId(null);
+                }}
                 onClick={() => {
                   // Assign to focused pane on click
-                  assignProcessToPane(process.id, focusedPaneId);
+                  assignProcessToPane(process.id, activePaneId);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    assignProcessToPane(process.id, focusedPaneId);
+                    assignProcessToPane(process.id, activePaneId);
                   }
                 }}
                 className={cn(
-                  'group flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm transition-colors cursor-grab active:cursor-grabbing',
+                  'group flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm transition-colors',
+                  !isMobile && 'cursor-grab active:cursor-grabbing',
                   isFocusedProcess
                     ? 'bg-accent text-accent-foreground'
                     : isAssigned
@@ -559,6 +600,25 @@ export function SplitTerminalContainer({
         ) : processes.length === 0 ? (
           <div className="flex h-full items-center justify-center bg-[#0a0a0a]">
             <span className="text-muted-foreground">Click "+ New Tab" to spawn a process</span>
+          </div>
+        ) : isMobile ? (
+          <div className="h-full overflow-hidden">
+            <TerminalPane
+              key={activePaneId}
+              ref={(handle) => {
+                if (handle) {
+                  paneRefs.current.set(activePaneId, handle);
+                } else {
+                  paneRefs.current.delete(activePaneId);
+                }
+              }}
+              process={getProcessForPane(activePaneId)}
+              onInput={onInput}
+              onResize={onResize}
+              onPtyData={onPtyData}
+              isFocused={true}
+              onFocus={() => setFocusedPaneId(activePaneId)}
+            />
           </div>
         ) : (
           renderPaneNode(layout)

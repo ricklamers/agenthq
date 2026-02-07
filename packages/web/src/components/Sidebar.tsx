@@ -1,7 +1,7 @@
 // Left sidebar with repo/worktree tree
 
 import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Folder, GitBranch, Plus, Settings, Circle, RotateCcw } from 'lucide-react';
+import { ChevronDown, ChevronRight, Folder, GitBranch, Plus, Settings, Circle, RotateCcw, X } from 'lucide-react';
 import type { Repo, Environment, Worktree, Process } from '@agenthq/shared';
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
@@ -17,6 +17,7 @@ interface SidebarProps {
   onNewWorktree: (repoName: string, envId: string) => void;
   onSelectEnv: (envId: string) => void;
   onOpenSettings: () => void;
+  onClose?: () => void;
 }
 
 export function Sidebar({
@@ -30,6 +31,7 @@ export function Sidebar({
   onNewWorktree,
   onSelectEnv,
   onOpenSettings,
+  onClose,
 }: SidebarProps) {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [expandedRepos, setExpandedRepos] = useState<Set<string>>(new Set());
@@ -83,9 +85,16 @@ export function Sidebar({
       <div className="border-b border-border px-3 py-3">
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-lg font-semibold">Agent HQ</h1>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onOpenSettings} title="Settings">
-            <Settings className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            {onClose && (
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose} title="Close sidebar">
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onOpenSettings} title="Settings">
+              <Settings className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
         
         {/* Environment Dropdown */}

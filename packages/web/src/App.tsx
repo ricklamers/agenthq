@@ -2,13 +2,16 @@
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import type { AgentType } from '@agenthq/shared';
+import { Menu } from 'lucide-react';
 import { useWebSocket } from './hooks/useWebSocket';
 import { Sidebar } from './components/Sidebar';
 import { SplitTerminalContainer, createDefaultPaneState, type PaneLayoutState } from './components/SplitTerminalContainer';
 import { SpawnDialog } from './components/SpawnDialog';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { SettingsPage } from './components/SettingsPage';
+import { Button } from './components/ui/button';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './components/ui/resizable';
+import { cn } from './lib/utils';
 
 type ConfirmAction =
   | { type: 'kill-process'; processId: string }
@@ -30,6 +33,7 @@ export function App() {
   }, [selectedEnvId]);
   
   const [showSettings, setShowSettings] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [spawnDialog, setSpawnDialog] = useState<{ worktreeId: string; envId: string; cols?: number; rows?: number } | null>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   
@@ -351,6 +355,61 @@ export function App() {
     }
   };
 
+  const closeMobileSidebar = useCallback(() => {
+    setIsMobileSidebarOpen(false);
+  }, []);
+
+  const handleSelectWorktreeFromSidebar = useCallback((worktreeId: string) => {
+    handleSelectWorktree(worktreeId);
+    setIsMobileSidebarOpen(false);
+  }, [handleSelectWorktree]);
+
+  const handleNewWorktreeFromSidebar = useCallback((repoName: string, envId: string) => {
+    void handleNewWorktree(repoName, envId);
+    setIsMobileSidebarOpen(false);
+  }, [handleNewWorktree]);
+
+  const handleSelectEnvFromSidebar = useCallback((envId: string) => {
+    setSelectedEnvId(envId);
+    setIsMobileSidebarOpen(false);
+  }, []);
+
+  const handleOpenSettingsFromSidebar = useCallback(() => {
+    setShowSettings(true);
+    setIsMobileSidebarOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileSidebarOpen) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsMobileSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [isMobileSidebarOpen]);
+
+  const terminalContent = (
+    <SplitTerminalContainer
+      worktree={selectedWorktree ?? null}
+      processes={worktreeProcesses}
+      paneState={currentPaneState}
+      onPaneStateChange={handlePaneStateChange}
+      onInput={handleInput}
+      onResize={handleResize}
+      onPtyData={onPtyData}
+      onNewProcess={handleNewProcess}
+      onKillProcess={handleKillProcess}
+      onArchiveWorktree={handleArchiveWorktree}
+      onViewDiff={handleViewDiff}
+      onMerge={handleMerge}
+      onMergeWithAgent={handleMergeWithAgent}
+    />
+  );
+
   // Show settings page
   if (showSettings) {
     return (
@@ -363,9 +422,66 @@ export function App() {
 
   return (
     <div className="h-screen w-screen overflow-hidden">
-      <ResizablePanelGroup orientation="horizontal">
-        {/* Sidebar */}
-        <ResizablePanel defaultSize="256px" minSize="200px" maxSize="500px">
+      <div className="hidden h-full md:block">
+        <ResizablePanelGroup orientation="horizontal">
+          {/* Sidebar */}
+          <ResizablePanel defaultSize="256px" minSize="200px" maxSize="500px">
+            <Sidebar
+              connected={connected}
+              environments={environments}
+              worktrees={worktrees}
+              processes={processes}
+              selectedWorktreeId={selectedWorktreeId}
+              selectedEnvId={selectedEnvId}
+              onSelectWorktree={handleSelectWorktree}
+              onNewWorktree={handleNewWorktree}
+              onSelectEnv={setSelectedEnvId}
+              onOpenSettings={() => setShowSettings(true)}
+            />
+          </ResizablePanel>
+
+          <ResizableHandle />
+
+          {/* Main content */}
+          <ResizablePanel minSize="50%">
+            {terminalContent}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
+
+      <div className="relative h-full md:hidden">
+        {terminalContent}
+
+        <Button
+          variant="secondary"
+          size="icon"
+          className={cn(
+            'absolute left-3 top-3 z-30 h-9 w-9 rounded-full shadow',
+            isMobileSidebarOpen && 'pointer-events-none opacity-0'
+          )}
+          onClick={() => setIsMobileSidebarOpen(true)}
+          title="Open sidebar"
+          aria-label="Open sidebar"
+        >
+          <Menu className="h-4 w-4" />
+        </Button>
+
+        <button
+          type="button"
+          aria-label="Close sidebar backdrop"
+          onClick={closeMobileSidebar}
+          className={cn(
+            'absolute inset-0 z-40 bg-black/35 transition-opacity',
+            isMobileSidebarOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+          )}
+        />
+
+        <aside
+          className={cn(
+            'absolute inset-y-0 left-0 z-50 w-[88vw] max-w-sm border-r border-border bg-card shadow-xl transition-transform duration-200 ease-out',
+            isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+          )}
+        >
           <Sidebar
             connected={connected}
             environments={environments}
@@ -373,34 +489,14 @@ export function App() {
             processes={processes}
             selectedWorktreeId={selectedWorktreeId}
             selectedEnvId={selectedEnvId}
-            onSelectWorktree={handleSelectWorktree}
-            onNewWorktree={handleNewWorktree}
-            onSelectEnv={setSelectedEnvId}
-            onOpenSettings={() => setShowSettings(true)}
+            onSelectWorktree={handleSelectWorktreeFromSidebar}
+            onNewWorktree={handleNewWorktreeFromSidebar}
+            onSelectEnv={handleSelectEnvFromSidebar}
+            onOpenSettings={handleOpenSettingsFromSidebar}
+            onClose={closeMobileSidebar}
           />
-        </ResizablePanel>
-
-        <ResizableHandle />
-
-        {/* Main content */}
-        <ResizablePanel minSize="50%">
-          <SplitTerminalContainer
-            worktree={selectedWorktree ?? null}
-            processes={worktreeProcesses}
-            paneState={currentPaneState}
-            onPaneStateChange={handlePaneStateChange}
-            onInput={handleInput}
-            onResize={handleResize}
-            onPtyData={onPtyData}
-            onNewProcess={handleNewProcess}
-            onKillProcess={handleKillProcess}
-            onArchiveWorktree={handleArchiveWorktree}
-            onViewDiff={handleViewDiff}
-            onMerge={handleMerge}
-            onMergeWithAgent={handleMergeWithAgent}
-          />
-        </ResizablePanel>
-      </ResizablePanelGroup>
+        </aside>
+      </div>
 
       {/* Spawn dialog */}
       {spawnDialog && (

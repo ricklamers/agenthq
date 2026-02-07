@@ -93,7 +93,7 @@ journalctl --user -u agenthq-server -u agenthq-web -u agenthq-daemon -f
 
 - Workspace: `/tmp/agenthq-test`
 - Server: `http://127.0.0.1:3000` (`pnpm --filter @agenthq/server dev`)
-- Web (Vite dev server): `http://127.0.0.1:5173` (`pnpm --filter @agenthq/web dev -- --host 127.0.0.1 --port 5173`)
+- Web (Vite preview, built assets): `http://127.0.0.1:5173` (`pnpm --filter @agenthq/web exec vite preview --host 127.0.0.1 --port 5173 --strictPort`)
 - Daemon connects to: `ws://127.0.0.1:3000/ws/daemon`
 - Nginx domain: `agenthq.omba.nl`
   - `80 -> 301 https`
@@ -110,9 +110,21 @@ ss -ltnp | grep -E ':(3000|5173)\b'
 
 Expected:
 
-- Vite `200`
+- Web `200`
 - API `200`
 - `local` environment status `connected`
+
+### Frontend Update Flow (Current)
+
+- The live web service is **not** running HMR anymore.
+- Frontend code changes require rebuilding before they appear in the browser:
+
+```bash
+cd /tmp/agenthq-test/test-repo/agenthq-clone
+pnpm --filter @agenthq/web build
+```
+
+- After build completes, a manual browser reload picks up the new client bundle.
 
 ### Current Product Behaviors Added in Live Dev
 

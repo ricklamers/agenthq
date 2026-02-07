@@ -17,6 +17,9 @@ interface UseTerminalReturn {
   terminalRef: (node: HTMLDivElement | null) => void;
   write: (data: string) => void;
   fit: () => void;
+  focus: () => void;
+  scrollLines: (lines: number) => void;
+  keyboardInsetPx: number;
   clear: () => void;
   getDimensions: () => { cols: number; rows: number } | null;
   serialize: () => string | null;
@@ -34,6 +37,7 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
   const onDataRef = useRef(options.onData);
   const onResizeRef = useRef(options.onResize);
   const lastResizeSentRef = useRef<{ cols: number; rows: number } | null>(null);
+  const keyboardInsetRef = useRef(0);
   const viewportStateRef = useRef({
     isMobile: false,
     keyboardLikelyOpen: false,
@@ -43,6 +47,7 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
   
   // Track when terminal is fully initialized and ready to receive data
   const [isReady, setIsReady] = useState(false);
+  const [keyboardInsetPx, setKeyboardInsetPx] = useState(0);
 
   // Keep refs updated
   onDataRef.current = options.onData;
@@ -58,6 +63,8 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
       xtermRef.current?.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
+      keyboardInsetRef.current = 0;
+      setKeyboardInsetPx(0);
       setIsReady(false);
     }
 
@@ -131,16 +138,27 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
       if (isMobile && visualViewport) {
         const updateKeyboardState = () => {
           const state = viewportStateRef.current;
+          const scale = visualViewport.scale ?? 1;
+          const isZoomed = Math.abs(scale - 1) > 0.05;
+
           if (visualViewport.height > state.maxViewportHeight) {
             state.maxViewportHeight = visualViewport.height;
           }
 
           const previous = state.keyboardLikelyOpen;
-          const keyboardLikelyOpen = state.maxViewportHeight > 0
-            ? visualViewport.height < state.maxViewportHeight - 120
+          const rawInset = Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop);
+          const keyboardLikelyOpen = !isZoomed
+            && state.maxViewportHeight > 0
+            ? visualViewport.height < state.maxViewportHeight - 120 && rawInset > 80
             : false;
 
           state.keyboardLikelyOpen = keyboardLikelyOpen;
+          const nextInsetPx = keyboardLikelyOpen ? rawInset : 0;
+          if (Math.abs(nextInsetPx - keyboardInsetRef.current) >= 1) {
+            keyboardInsetRef.current = nextInsetPx;
+            setKeyboardInsetPx(nextInsetPx);
+          }
+
           if (keyboardLikelyOpen !== previous) {
             // Ignore transient mobile keyboard viewport changes.
             state.suppressResizeUntil = Date.now() + 700;
@@ -184,6 +202,12 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
 
     // Resize observer
     const resizeObserver = new ResizeObserver(() => {
+      const viewportState = viewportStateRef.current;
+      const shouldSuppressForMobileKeyboard = viewportState.isMobile
+        && (viewportState.keyboardLikelyOpen || Date.now() < viewportState.suppressResizeUntil);
+      if (shouldSuppressForMobileKeyboard) {
+        return;
+      }
       fitAddon.fit();
     });
     resizeObserver.observe(node);
@@ -209,6 +233,15 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
 
   const fit = useCallback(() => {
     fitAddonRef.current?.fit();
+  }, []);
+
+  const focus = useCallback(() => {
+    xtermRef.current?.focus();
+  }, []);
+
+  const scrollLines = useCallback((lines: number) => {
+    if (!lines) return;
+    xtermRef.current?.scrollLines(lines);
   }, []);
 
   const clear = useCallback(() => {
@@ -241,5 +274,5 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     terminal.write(data);
   }, []);
 
-  return { terminalRef, write, fit, clear, getDimensions, serialize, restore, isReady };
+  return { terminalRef, write, fit, focus, scrollLines, keyboardInsetPx, clear, getDimensions, serialize, restore, isReady };
 }

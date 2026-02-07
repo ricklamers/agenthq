@@ -449,22 +449,23 @@ export function App() {
         </ResizablePanelGroup>
       </div>
 
-      <div className="relative h-full md:hidden">
-        {terminalContent}
+      <div className="relative flex h-full flex-col md:hidden">
+        <div className="z-30 flex h-12 items-center border-b border-border bg-background/95 px-3 backdrop-blur">
+          <Button
+            variant="secondary"
+            size="icon"
+            className="h-9 w-9 rounded-full shadow"
+            onClick={() => setIsMobileSidebarOpen(true)}
+            title="Open sidebar"
+            aria-label="Open sidebar"
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
+        </div>
 
-        <Button
-          variant="secondary"
-          size="icon"
-          className={cn(
-            'absolute left-3 top-3 z-30 h-9 w-9 rounded-full shadow',
-            isMobileSidebarOpen && 'pointer-events-none opacity-0'
-          )}
-          onClick={() => setIsMobileSidebarOpen(true)}
-          title="Open sidebar"
-          aria-label="Open sidebar"
-        >
-          <Menu className="h-4 w-4" />
-        </Button>
+        <div className="min-h-0 flex-1">
+          {terminalContent}
+        </div>
 
         <button
           type="button"

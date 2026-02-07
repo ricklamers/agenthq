@@ -1,6 +1,6 @@
 // Single terminal pane that can display one process
 
-import { useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
+import { useEffect, useCallback, useRef, forwardRef, useImperativeHandle, useState, type TouchEvent } from 'react';
 import type { Process } from '@agenthq/shared';
 import { useTerminal } from '@/hooks/useTerminal';
 
@@ -20,6 +20,30 @@ export interface TerminalPaneHandle {
 
 export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
   function TerminalPane({ process, onInput, onResize, onPtyData, isFocused, onFocus }, ref) {
+    const paneRef = useRef<HTMLDivElement | null>(null);
+    const touchScrollStateRef = useRef<{
+      active: boolean;
+      startY: number;
+      startScrollTop: number;
+    }>({
+      active: false,
+      startY: 0,
+      startScrollTop: 0,
+    });
+    const [isMobile, setIsMobile] = useState(() => {
+      if (typeof window === 'undefined') return false;
+      return window.matchMedia('(max-width: 767px)').matches;
+    });
+
+    useEffect(() => {
+      if (typeof window === 'undefined') return;
+      const mediaQuery = window.matchMedia('(max-width: 767px)');
+      const handleChange = (event: MediaQueryListEvent) => setIsMobile(event.matches);
+      setIsMobile(mediaQuery.matches);
+      mediaQuery.addEventListener('change', handleChange);
+      return () => mediaQuery.removeEventListener('change', handleChange);
+    }, []);
+
     const handleData = useCallback(
       (data: string) => {
         if (process) {
@@ -42,6 +66,10 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
       onData: handleData,
       onResize: handleResize,
     });
+
+    const attachTerminalRef = useCallback((node: HTMLDivElement | null) => {
+      terminalRef(node);
+    }, [terminalRef]);
 
     // Expose getDimensions and fit to parent via ref
     useImperativeHandle(ref, () => ({
@@ -131,12 +159,58 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
       };
     }, []);
 
+    const getViewportElement = useCallback((): HTMLElement | null => {
+      return paneRef.current?.querySelector('.xterm-viewport') ?? null;
+    }, []);
+
+    const handleLeftTouchStart = useCallback((e: TouchEvent<HTMLDivElement>) => {
+      const viewport = getViewportElement();
+      if (!viewport) return;
+      touchScrollStateRef.current.active = true;
+      touchScrollStateRef.current.startY = e.touches[0]?.clientY ?? 0;
+      touchScrollStateRef.current.startScrollTop = viewport.scrollTop;
+    }, [getViewportElement]);
+
+    const handleLeftTouchMove = useCallback((e: TouchEvent<HTMLDivElement>) => {
+      if (!touchScrollStateRef.current.active) return;
+      const viewport = getViewportElement();
+      if (!viewport) return;
+
+      const currentY = e.touches[0]?.clientY ?? touchScrollStateRef.current.startY;
+      const delta = currentY - touchScrollStateRef.current.startY;
+      viewport.scrollTop = touchScrollStateRef.current.startScrollTop - delta;
+      e.preventDefault();
+    }, [getViewportElement]);
+
+    const handleLeftTouchEnd = useCallback(() => {
+      touchScrollStateRef.current.active = false;
+    }, []);
+
     return (
       <div 
+        ref={paneRef}
         className="relative h-full w-full overflow-hidden bg-[#0a0a0a]"
         onClick={onFocus}
       >
-        <div ref={terminalRef} className="h-full w-full" />
+        <div ref={attachTerminalRef} className="h-full w-full" />
+
+        {isMobile && process && (
+          <>
+            {/* Left half: custom touch-to-scroll for xterm buffer */}
+            <div
+              className="absolute inset-y-0 left-0 z-10 w-1/2 touch-none"
+              onTouchStart={handleLeftTouchStart}
+              onTouchMove={handleLeftTouchMove}
+              onTouchEnd={handleLeftTouchEnd}
+              onTouchCancel={handleLeftTouchEnd}
+            />
+            {/* Right half: preserve default browser/page touch behavior */}
+            <div
+              className="absolute inset-y-0 right-0 z-10 w-1/2 touch-pan-y"
+              onClick={onFocus}
+            />
+          </>
+        )}
         
         {/* Overlay when no process selected */}
         {!process && (

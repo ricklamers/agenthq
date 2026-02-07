@@ -30,8 +30,16 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
   const serializeAddonRef = useRef<SerializeAddon | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const visualViewportCleanupRef = useRef<(() => void) | null>(null);
   const onDataRef = useRef(options.onData);
   const onResizeRef = useRef(options.onResize);
+  const lastResizeSentRef = useRef<{ cols: number; rows: number } | null>(null);
+  const viewportStateRef = useRef({
+    isMobile: false,
+    keyboardLikelyOpen: false,
+    maxViewportHeight: 0,
+    suppressResizeUntil: 0,
+  });
   
   // Track when terminal is fully initialized and ready to receive data
   const [isReady, setIsReady] = useState(false);
@@ -45,6 +53,8 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     // Cleanup previous terminal if container changes
     if (containerRef.current && containerRef.current !== node) {
       resizeObserverRef.current?.disconnect();
+      visualViewportCleanupRef.current?.();
+      visualViewportCleanupRef.current = null;
       xtermRef.current?.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
@@ -113,6 +123,40 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     terminal.open(node);
     fitAddon.fit();
 
+    if (typeof window !== 'undefined') {
+      const isMobile = window.matchMedia('(max-width: 767px)').matches;
+      viewportStateRef.current.isMobile = isMobile;
+
+      const visualViewport = window.visualViewport;
+      if (isMobile && visualViewport) {
+        const updateKeyboardState = () => {
+          const state = viewportStateRef.current;
+          if (visualViewport.height > state.maxViewportHeight) {
+            state.maxViewportHeight = visualViewport.height;
+          }
+
+          const previous = state.keyboardLikelyOpen;
+          const keyboardLikelyOpen = state.maxViewportHeight > 0
+            ? visualViewport.height < state.maxViewportHeight - 120
+            : false;
+
+          state.keyboardLikelyOpen = keyboardLikelyOpen;
+          if (keyboardLikelyOpen !== previous) {
+            // Ignore transient mobile keyboard viewport changes.
+            state.suppressResizeUntil = Date.now() + 700;
+          }
+        };
+
+        updateKeyboardState();
+        visualViewport.addEventListener('resize', updateKeyboardState);
+        visualViewport.addEventListener('scroll', updateKeyboardState);
+        visualViewportCleanupRef.current = () => {
+          visualViewport.removeEventListener('resize', updateKeyboardState);
+          visualViewport.removeEventListener('scroll', updateKeyboardState);
+        };
+      }
+    }
+
     // Handle user input via ref to avoid re-subscribing
     terminal.onData((data) => {
       onDataRef.current?.(data);
@@ -120,6 +164,18 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
 
     // Handle resize via ref
     terminal.onResize(({ cols, rows }) => {
+      const viewportState = viewportStateRef.current;
+      const shouldSuppressForMobileKeyboard = viewportState.isMobile
+        && (viewportState.keyboardLikelyOpen || Date.now() < viewportState.suppressResizeUntil);
+      if (shouldSuppressForMobileKeyboard) {
+        return;
+      }
+
+      const last = lastResizeSentRef.current;
+      if (last && last.cols === cols && last.rows === rows) {
+        return;
+      }
+      lastResizeSentRef.current = { cols, rows };
       onResizeRef.current?.(cols, rows);
     });
 

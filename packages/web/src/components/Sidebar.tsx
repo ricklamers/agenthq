@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronRight, Folder, GitBranch, Plus, Settings, Circle, RotateCcw, X } from 'lucide-react';
 import type { Repo, Environment, Worktree, Process } from '@agenthq/shared';
 import { Button } from './ui/button';
+import { AddRepoDialog } from './AddRepoDialog';
 import { cn } from '@/lib/utils';
 
 interface SidebarProps {
@@ -36,6 +37,7 @@ export function Sidebar({
   const [repos, setRepos] = useState<Repo[]>([]);
   const [expandedRepos, setExpandedRepos] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [showAddRepoDialog, setShowAddRepoDialog] = useState(false);
 
   const fetchRepos = useCallback(async () => {
     setLoading(true);
@@ -85,19 +87,15 @@ export function Sidebar({
   const selectedEnv = environments.find((e) => e.id === selectedEnvId);
   const envConnected = selectedEnv?.status === 'connected';
 
-  const handleAddRepo = async () => {
+  const handleAddRepo = () => {
     if (selectedEnvId !== 'local') {
       alert('Adding repos is currently supported for Local environment only.');
       return;
     }
+    setShowAddRepoDialog(true);
+  };
 
-    const input = window.prompt(
-      'Enter a public GitHub repo URL',
-      'https://github.com/owner/repo'
-    );
-    const repoUrl = input?.trim();
-    if (!repoUrl) return;
-
+  const handleAddRepoSubmit = async (repoUrl: string) => {
     try {
       const res = await fetch('/api/repos', {
         method: 'POST',
@@ -107,15 +105,17 @@ export function Sidebar({
 
       const data = await res.json();
       if (!res.ok) {
-        alert(`Failed to add repo: ${data.error ?? 'Unknown error'}`);
-        return;
+        throw new Error(data.error ?? 'Unknown error');
       }
 
       setExpandedRepos((prev) => new Set([...prev, data.name]));
       await fetchRepos();
     } catch (err) {
       console.error('Failed to add repo:', err);
-      alert('Failed to add repo');
+      if (err instanceof Error) {
+        throw err;
+      }
+      throw new Error('Failed to add repo');
     }
   };
 
@@ -279,6 +279,12 @@ export function Sidebar({
           </div>
         )}
       </div>
+
+      <AddRepoDialog
+        open={showAddRepoDialog}
+        onClose={() => setShowAddRepoDialog(false)}
+        onSubmit={handleAddRepoSubmit}
+      />
 
       {/* Environments summary */}
       <div className="border-t border-border p-2">

@@ -1,6 +1,6 @@
 // Left sidebar with repo/worktree tree
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronRight, Folder, GitBranch, Plus, Settings, Circle, RotateCcw, X } from 'lucide-react';
 import type { Repo, Environment, Worktree, Process } from '@agenthq/shared';
 import { Button } from './ui/button';
@@ -37,20 +37,26 @@ export function Sidebar({
   const [expandedRepos, setExpandedRepos] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
-  // Fetch repos for selected environment
-  useEffect(() => {
+  const fetchRepos = useCallback(async () => {
     setLoading(true);
     const url = selectedEnvId ? `/api/repos?envId=${encodeURIComponent(selectedEnvId)}` : '/api/repos';
-    fetch(url)
-      .then((res) => res.json())
-      .then((data) => {
-        setRepos(data);
-        // Expand all repos by default
-        setExpandedRepos(new Set(data.map((r: Repo) => r.name)));
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      setRepos(data);
+      // Expand all repos by default
+      setExpandedRepos(new Set(data.map((r: Repo) => r.name)));
+    } catch (err) {
+      console.error('Failed to fetch repos:', err);
+    } finally {
+      setLoading(false);
+    }
   }, [selectedEnvId]);
+
+  // Fetch repos for selected environment
+  useEffect(() => {
+    void fetchRepos();
+  }, [fetchRepos]);
 
   const toggleRepo = (name: string) => {
     setExpandedRepos((prev) => {
@@ -78,6 +84,40 @@ export function Sidebar({
 
   const selectedEnv = environments.find((e) => e.id === selectedEnvId);
   const envConnected = selectedEnv?.status === 'connected';
+
+  const handleAddRepo = async () => {
+    if (selectedEnvId !== 'local') {
+      alert('Adding repos is currently supported for Local environment only.');
+      return;
+    }
+
+    const input = window.prompt(
+      'Enter a public GitHub repo URL',
+      'https://github.com/owner/repo'
+    );
+    const repoUrl = input?.trim();
+    if (!repoUrl) return;
+
+    try {
+      const res = await fetch('/api/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: repoUrl, envId: selectedEnvId }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        alert(`Failed to add repo: ${data.error ?? 'Unknown error'}`);
+        return;
+      }
+
+      setExpandedRepos((prev) => new Set([...prev, data.name]));
+      await fetchRepos();
+    } catch (err) {
+      console.error('Failed to add repo:', err);
+      alert('Failed to add repo');
+    }
+  };
 
   return (
     <div className="flex h-full flex-col border-r border-border bg-card">
@@ -132,7 +172,14 @@ export function Sidebar({
       <div className="flex-1 overflow-auto p-2">
         <div className="mb-2 flex items-center justify-between px-2">
           <span className="text-xs font-medium uppercase text-muted-foreground">Repos</span>
-          <Button variant="ghost" size="icon" className="h-6 w-6">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={handleAddRepo}
+            disabled={selectedEnvId !== 'local'}
+            title={selectedEnvId === 'local' ? 'Add public GitHub repo' : 'Adding repos currently supports Local only'}
+          >
             <Plus className="h-4 w-4" />
           </Button>
         </div>

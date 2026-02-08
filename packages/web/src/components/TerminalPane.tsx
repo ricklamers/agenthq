@@ -33,7 +33,7 @@ export function TerminalPane({ process, onInput, onResize, onPtyData, onFocus }:
     [processId, onResize]
   );
 
-  const { terminalRef, write, fit, focus, clear, getDimensions, isReady } = useTerminal({
+  const { terminalRef, write, fit, focus, clear, isReady } = useTerminal({
     onData: handleData,
     onResize: handleResize,
     resolvedTheme,
@@ -71,27 +71,19 @@ export function TerminalPane({ process, onInput, onResize, onPtyData, onFocus }:
 
     subscribedProcessIdRef.current = processId;
     clear();
-    fit();
 
     if (!processId) {
+      fit();
       return;
     }
 
-    const resizeRafId = window.requestAnimationFrame(() => {
-      const dimensions = getDimensions();
-      if (dimensions) {
-        onResize(processId, dimensions.cols, dimensions.rows);
-      }
-    });
-
+    // Subscribe to PTY data first — this sends the 'attach' message so the
+    // server-side PTY is prepared before we send resize dimensions.
     cleanupRef.current = onPtyData(processId, (data) => {
       writeRef.current(data);
     });
-
-    return () => {
-      window.cancelAnimationFrame(resizeRafId);
-    };
-  }, [isReady, processId, onPtyData, clear, fit, getDimensions, onResize]);
+    fit();
+  }, [isReady, processId, onPtyData, clear, fit]);
 
   useEffect(() => {
     return () => {

@@ -57,7 +57,7 @@ cd daemon && go build ./cmd/agenthq-daemon && ./agenthq-daemon
 ### Canonical Checkout
 
 - Active checkout for live development:
-  - `/tmp/agenthq-test/test-repo/agenthq-clone`
+  - `/tmp/agenthq-test/agenthq`
 - Do not run the app from `/home/rick/workspace/agenthq` anymore.
 
 ### Runtime Process Manager
@@ -120,7 +120,7 @@ Expected:
 - Frontend code changes require rebuilding before they appear in the browser:
 
 ```bash
-cd /tmp/agenthq-test/test-repo/agenthq-clone
+cd /tmp/agenthq-test/agenthq
 pnpm --filter @agenthq/web build
 ```
 

@@ -143,13 +143,12 @@ export function useWebSocket(): UseWebSocketReturn {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message));
     } else {
-      // Queue message to send when WebSocket connects.
-      // For resize, only keep the most recent dimensions per process.
+      // Never queue resize: send live only, no caching/filtering.
       if (message.type === 'resize') {
-        pendingMessagesRef.current = pendingMessagesRef.current.filter(
-          (pending) => pending.type !== 'resize' || pending.processId !== message.processId
-        );
+        return;
       }
+
+      // Queue non-resize messages to send when WebSocket connects.
       pendingMessagesRef.current.push(message);
     }
   }, []);

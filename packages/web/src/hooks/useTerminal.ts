@@ -73,7 +73,6 @@ interface UseTerminalReturn {
   fit: () => void;
   focus: () => void;
   clear: () => void;
-  getDimensions: () => { cols: number; rows: number } | null;
   isReady: boolean;
 }
 
@@ -81,71 +80,37 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const fitIntervalRef = useRef<number | null>(null);
   const fitRafRef = useRef<number | null>(null);
-  const fitTimeoutRef = useRef<number | null>(null);
   const windowResizeListenerRef = useRef<(() => void) | null>(null);
-  const fontLoadingDoneListenerRef = useRef<(() => void) | null>(null);
-  const lastContainerSizeRef = useRef<{ width: number; height: number } | null>(null);
   const onDataRef = useRef(options.onData);
   const onResizeRef = useRef(options.onResize);
-  const lastResizeSentRef = useRef<{ cols: number; rows: number } | null>(null);
   const [isReady, setIsReady] = useState(false);
 
   onDataRef.current = options.onData;
   onResizeRef.current = options.onResize;
 
   const cleanupTerminal = useCallback(() => {
-    resizeObserverRef.current?.disconnect();
-    resizeObserverRef.current = null;
+    if (fitIntervalRef.current !== null) {
+      window.clearInterval(fitIntervalRef.current);
+      fitIntervalRef.current = null;
+    }
     if (fitRafRef.current !== null) {
       window.cancelAnimationFrame(fitRafRef.current);
       fitRafRef.current = null;
-    }
-    if (fitTimeoutRef.current !== null) {
-      window.clearTimeout(fitTimeoutRef.current);
-      fitTimeoutRef.current = null;
     }
     if (windowResizeListenerRef.current) {
       window.removeEventListener('resize', windowResizeListenerRef.current);
       windowResizeListenerRef.current = null;
     }
-    if (fontLoadingDoneListenerRef.current && 'fonts' in document) {
-      document.fonts.removeEventListener('loadingdone', fontLoadingDoneListenerRef.current);
-      fontLoadingDoneListenerRef.current = null;
-    }
     xtermRef.current?.dispose();
     xtermRef.current = null;
     fitAddonRef.current = null;
-    lastResizeSentRef.current = null;
-    lastContainerSizeRef.current = null;
     setIsReady(false);
   }, []);
 
   const fit = useCallback(() => {
     fitAddonRef.current?.fit();
-  }, []);
-
-  const scheduleFit = useCallback(() => {
-    if (!fitAddonRef.current) return;
-    if (fitRafRef.current !== null) {
-      window.cancelAnimationFrame(fitRafRef.current);
-    }
-    fitRafRef.current = window.requestAnimationFrame(() => {
-      fitRafRef.current = null;
-      fitAddonRef.current?.fit();
-    });
-  }, []);
-
-  const scheduleSettledFit = useCallback(() => {
-    if (!fitAddonRef.current) return;
-    if (fitTimeoutRef.current !== null) {
-      window.clearTimeout(fitTimeoutRef.current);
-    }
-    fitTimeoutRef.current = window.setTimeout(() => {
-      fitTimeoutRef.current = null;
-      fitAddonRef.current?.fit();
-    }, 120);
   }, []);
 
   const terminalRef = useCallback((node: HTMLDivElement | null) => {
@@ -171,79 +136,39 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     terminal.loadAddon(unicode11Addon);
     terminal.unicode.activeVersion = '11';
 
-    try {
-      const webglAddon = new WebglAddon();
-      terminal.loadAddon(webglAddon);
-      webglAddon.onContextLoss(() => {
-        webglAddon.dispose();
-      });
-    } catch (e) {
-      console.warn('WebGL addon not supported:', e);
-    }
+    const webglAddon = new WebglAddon();
+    terminal.loadAddon(webglAddon);
+    webglAddon.onContextLoss(() => {
+      webglAddon.dispose();
+    });
 
     terminal.open(node);
     fitAddonRef.current = fitAddon;
-    fitAddon.fit();
+    xtermRef.current = terminal;
 
     terminal.onData((data) => {
       onDataRef.current?.(data);
     });
 
     terminal.onResize(({ cols, rows }) => {
-      const last = lastResizeSentRef.current;
-      if (last && last.cols === cols && last.rows === rows) {
-        return;
-      }
-      lastResizeSentRef.current = { cols, rows };
       onResizeRef.current?.(cols, rows);
     });
 
-    xtermRef.current = terminal;
-
-    // Run an additional fit pass after layout settles.
-    scheduleFit();
-    scheduleSettledFit();
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-
-      const width = Math.round(entry.contentRect.width);
-      const height = Math.round(entry.contentRect.height);
-      const last = lastContainerSizeRef.current;
-      if (last && last.width === width && last.height === height) {
-        return;
-      }
-
-      lastContainerSizeRef.current = { width, height };
-      scheduleFit();
-      scheduleSettledFit();
-    });
-    resizeObserver.observe(node);
-    resizeObserverRef.current = resizeObserver;
-
-    const handleWindowResize = () => {
-      scheduleFit();
-      scheduleSettledFit();
+    const runFit = () => {
+      fitAddon.fit();
     };
+    runFit();
+    fitRafRef.current = window.requestAnimationFrame(() => {
+      fitRafRef.current = null;
+      runFit();
+    });
+    fitIntervalRef.current = window.setInterval(runFit, 100);
+    const handleWindowResize = () => runFit();
     window.addEventListener('resize', handleWindowResize);
     windowResizeListenerRef.current = handleWindowResize;
 
-    if ('fonts' in document) {
-      const handleFontLoadingDone = () => {
-        scheduleFit();
-        scheduleSettledFit();
-      };
-      document.fonts.addEventListener('loadingdone', handleFontLoadingDone);
-      document.fonts.ready.then(() => {
-        scheduleFit();
-        scheduleSettledFit();
-      });
-      fontLoadingDoneListenerRef.current = handleFontLoadingDone;
-    }
-
     setIsReady(true);
-  }, [cleanupTerminal, scheduleFit, scheduleSettledFit]);
+  }, [cleanupTerminal]);
 
   const write = useCallback((data: string) => {
     xtermRef.current?.write(data);
@@ -259,12 +184,6 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     terminal.write('\x1b[2J\x1b[3J\x1b[H');
   }, []);
 
-  const getDimensions = useCallback((): { cols: number; rows: number } | null => {
-    const terminal = xtermRef.current;
-    if (!terminal) return null;
-    return { cols: terminal.cols, rows: terminal.rows };
-  }, []);
-
   // Update terminal theme when resolvedTheme changes
   useEffect(() => {
     const terminal = xtermRef.current;
@@ -272,5 +191,5 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     terminal.options.theme = getTerminalTheme(options.resolvedTheme ?? 'dark');
   }, [options.resolvedTheme]);
 
-  return { terminalRef, write, fit, focus, clear, getDimensions, isReady };
+  return { terminalRef, write, fit, focus, clear, isReady };
 }

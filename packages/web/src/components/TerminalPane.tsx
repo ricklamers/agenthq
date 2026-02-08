@@ -14,6 +14,7 @@ interface TerminalPaneProps {
 export function TerminalPane({ process, onInput, onResize, onPtyData, onFocus }: TerminalPaneProps) {
   const { resolvedTheme } = useTheme();
   const processId = process?.id ?? null;
+  const paneRef = useRef<HTMLDivElement | null>(null);
 
   const handleData = useCallback(
     (data: string) => {
@@ -39,6 +40,17 @@ export function TerminalPane({ process, onInput, onResize, onPtyData, onFocus }:
     resolvedTheme,
   });
 
+  const fitRafRef = useRef<number | null>(null);
+
+  const scheduleFit = useCallback(() => {
+    if (!isReady) return;
+    if (fitRafRef.current !== null) return;
+    fitRafRef.current = window.requestAnimationFrame(() => {
+      fitRafRef.current = null;
+      fit();
+    });
+  }, [fit, isReady]);
+
   const focusPane = useCallback(() => {
     focus();
     onFocus?.();
@@ -49,6 +61,59 @@ export function TerminalPane({ process, onInput, onResize, onPtyData, onFocus }:
 
   const subscribedProcessIdRef = useRef<string | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (fitRafRef.current !== null) {
+        window.cancelAnimationFrame(fitRafRef.current);
+        fitRafRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isReady) return;
+    const pane = paneRef.current;
+    if (!pane) return;
+
+    const targets = [pane.parentElement, pane].filter((target): target is HTMLElement => Boolean(target));
+    if (targets.length === 0) return;
+
+    scheduleFit();
+
+    const resizeObserver = new ResizeObserver(() => {
+      scheduleFit();
+    });
+    for (const target of targets) {
+      resizeObserver.observe(target);
+    }
+
+    const mutationObserver = new MutationObserver(() => {
+      scheduleFit();
+    });
+    for (const target of targets) {
+      mutationObserver.observe(target, {
+        attributes: true,
+        attributeFilter: ['class', 'style'],
+      });
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        scheduleFit();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('orientationchange', scheduleFit);
+
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('orientationchange', scheduleFit);
+    };
+  }, [isReady, scheduleFit]);
 
   useEffect(() => {
     if (!isReady) {
@@ -73,7 +138,7 @@ export function TerminalPane({ process, onInput, onResize, onPtyData, onFocus }:
     clear();
 
     if (!processId) {
-      fit();
+      scheduleFit();
       return;
     }
 
@@ -82,8 +147,8 @@ export function TerminalPane({ process, onInput, onResize, onPtyData, onFocus }:
     cleanupRef.current = onPtyData(processId, (data) => {
       writeRef.current(data);
     });
-    fit();
-  }, [isReady, processId, onPtyData, clear, fit]);
+    scheduleFit();
+  }, [isReady, processId, onPtyData, clear, scheduleFit]);
 
   useEffect(() => {
     return () => {
@@ -95,7 +160,7 @@ export function TerminalPane({ process, onInput, onResize, onPtyData, onFocus }:
   }, []);
 
   return (
-    <div className="relative h-full min-h-0 w-full overflow-hidden bg-terminal-bg" onClick={focusPane}>
+    <div ref={paneRef} className="relative h-full min-h-0 w-full overflow-hidden bg-terminal-bg" onClick={focusPane}>
       <div ref={terminalRef} className="h-full min-h-0 w-full overflow-hidden" />
 
       {!process && (

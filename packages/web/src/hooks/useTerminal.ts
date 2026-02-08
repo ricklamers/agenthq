@@ -80,9 +80,7 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const fitIntervalRef = useRef<number | null>(null);
   const fitRafRef = useRef<number | null>(null);
-  const windowResizeListenerRef = useRef<(() => void) | null>(null);
   const onDataRef = useRef(options.onData);
   const onResizeRef = useRef(options.onResize);
   const [isReady, setIsReady] = useState(false);
@@ -91,17 +89,9 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
   onResizeRef.current = options.onResize;
 
   const cleanupTerminal = useCallback(() => {
-    if (fitIntervalRef.current !== null) {
-      window.clearInterval(fitIntervalRef.current);
-      fitIntervalRef.current = null;
-    }
     if (fitRafRef.current !== null) {
       window.cancelAnimationFrame(fitRafRef.current);
       fitRafRef.current = null;
-    }
-    if (windowResizeListenerRef.current) {
-      window.removeEventListener('resize', windowResizeListenerRef.current);
-      windowResizeListenerRef.current = null;
     }
     xtermRef.current?.dispose();
     xtermRef.current = null;
@@ -154,18 +144,11 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
       onResizeRef.current?.(cols, rows);
     });
 
-    const runFit = () => {
-      fitAddon.fit();
-    };
-    runFit();
+    fitAddon.fit();
     fitRafRef.current = window.requestAnimationFrame(() => {
       fitRafRef.current = null;
-      runFit();
+      fitAddon.fit();
     });
-    fitIntervalRef.current = window.setInterval(runFit, 100);
-    const handleWindowResize = () => runFit();
-    window.addEventListener('resize', handleWindowResize);
-    windowResizeListenerRef.current = handleWindowResize;
 
     setIsReady(true);
   }, [cleanupTerminal]);

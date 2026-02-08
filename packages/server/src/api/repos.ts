@@ -1,12 +1,14 @@
 // Repository API routes
 
 import { mkdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { FastifyInstance } from 'fastify';
-import { repoStore, worktreeStore } from '../state/index.js';
+import { repoStore, worktreeStore, processStore } from '../state/index.js';
 import { browserHub } from '../ws/index.js';
+import { daemonHub } from '../ws/daemon-hub.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -136,14 +138,67 @@ export async function registerRepoRoutes(app: FastifyInstance): Promise<void> {
     return reply.status(201).send(repo);
   });
 
-  // Delete a repo (stub for now)
-  app.delete<{ Params: { name: string } }>('/api/repos/:name', async (request, reply) => {
-    const repo = repoStore.get(request.params.name);
+  // Delete a repo (local environment only for now)
+  app.delete<{ Params: { name: string }; Querystring: { envId?: string } }>('/api/repos/:name', async (request, reply) => {
+    const { envId = 'local' } = request.query;
+    if (envId !== 'local') {
+      return reply.status(400).send({ error: 'Removing repos is currently supported for local environment only' });
+    }
+
+    const repo = repoStore.getInEnv(envId, request.params.name);
     if (!repo) {
       return reply.status(404).send({ error: 'Repo not found' });
     }
 
-    // TODO: Implement repo deletion
-    return reply.status(501).send({ error: 'Not implemented yet' });
+    // Safety check: only allow deleting directories under workspace
+    const workspace = repoStore.getWorkspace();
+    if (!workspace) {
+      return reply.status(500).send({ error: 'Local workspace is not configured' });
+    }
+
+    const resolvedWorkspace = resolve(workspace);
+    const resolvedRepoPath = resolve(repo.path);
+    const allowedPrefix = `${resolvedWorkspace}${sep}`;
+    if (resolvedRepoPath !== resolvedWorkspace && !resolvedRepoPath.startsWith(allowedPrefix)) {
+      return reply.status(400).send({ error: 'Refusing to delete path outside workspace' });
+    }
+
+    try {
+      rmSync(resolvedRepoPath, { recursive: true, force: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown filesystem error';
+      return reply.status(500).send({ error: `Failed to remove repository directory: ${message}` });
+    }
+
+    // Remove related worktrees/processes from in-memory state and daemon
+    const repoWorktrees = worktreeStore.getByRepoNameAndEnv(repo.name, repo.envId);
+    for (const worktree of repoWorktrees) {
+      const worktreeProcesses = processStore.getByWorktree(worktree.id);
+
+      for (const process of worktreeProcesses) {
+        if (process.status === 'running' || process.status === 'pending') {
+          daemonHub.sendToEnv(process.envId, {
+            type: 'kill',
+            processId: process.id,
+          });
+        }
+        processStore.delete(process.id);
+        browserHub.broadcastProcessRemoved(process.id);
+      }
+
+      if (!worktree.isMain && worktree.envId) {
+        daemonHub.sendToEnv(worktree.envId, {
+          type: 'remove-worktree',
+          worktreeId: worktree.id,
+          worktreePath: worktree.path,
+        });
+      }
+
+      worktreeStore.delete(worktree.id);
+      browserHub.broadcastWorktreeRemoved(worktree.id);
+    }
+
+    repoStore.removeRepoMeta(repo.name);
+    return { success: true };
   });
 }

@@ -193,6 +193,23 @@ class RepoStore {
     repos[name] = { url, addedAt: Date.now() };
     writeFileSync(reposPath, JSON.stringify(repos, null, 2));
   }
+
+  /**
+   * Remove repo metadata entry
+   */
+  removeRepoMeta(name: string): void {
+    const reposPath = this.getReposFilePath();
+    if (!existsSync(reposPath)) return;
+
+    try {
+      const repos = JSON.parse(readFileSync(reposPath, 'utf-8')) as Record<string, { url?: string; addedAt: number }>;
+      if (!(name in repos)) return;
+      delete repos[name];
+      writeFileSync(reposPath, JSON.stringify(repos, null, 2));
+    } catch {
+      // Ignore parse/write errors
+    }
+  }
 }
 
 export const repoStore = new RepoStore();

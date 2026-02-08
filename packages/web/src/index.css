@@ -50,11 +50,20 @@
 }
 
 @layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    max-height: 100%;
+    margin: 0;
+  }
+
   * {
     @apply border-border;
   }
   body {
     @apply bg-background text-foreground;
+    overflow: hidden;
     font-feature-settings:
       'rlig' 1,
       'calt' 1;
@@ -64,9 +73,16 @@
 /* xterm.js styles */
 .xterm {
   height: 100%;
-  padding: 8px;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 0;
 }
 
-.xterm-viewport {
+.xterm .xterm-viewport {
   overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: auto;
 }

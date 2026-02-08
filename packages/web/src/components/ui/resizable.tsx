@@ -1,6 +1,7 @@
 import {
   Group,
   Panel,
+  type PanelProps,
   Separator,
   type GroupProps,
   type SeparatorProps,
@@ -14,14 +15,22 @@ const ResizablePanelGroup = ({
 }: GroupProps) => (
   <Group
     className={cn(
-      'flex h-full w-full data-[panel-group-direction=vertical]:flex-col',
+      'flex h-full min-h-0 w-full min-w-0 data-[panel-group-direction=vertical]:flex-col',
       className
     )}
     {...props}
   />
 );
 
-const ResizablePanel = Panel;
+const ResizablePanel = ({
+  className,
+  ...props
+}: PanelProps) => (
+  <Panel
+    className={cn('min-h-0 min-w-0 overflow-hidden', className)}
+    {...props}
+  />
+);
 
 const ResizableHandle = ({
   className,

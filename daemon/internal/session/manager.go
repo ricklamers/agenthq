@@ -89,8 +89,9 @@ func (m *Manager) Spawn(processID string, agent protocol.AgentType, worktreePath
 		}
 	} else {
 		// For TUI agents (claude-code, codex-cli, cursor-agent, etc.)
-		// Wrap in bash -l -c to run in a login shell environment, then exec bash
-		// to keep the terminal alive after the agent exits
+		// Run via an interactive login shell so agent resolution matches what users
+		// get in a normal terminal tab (.bashrc/.profile-driven PATH, aliases, etc).
+		// Keep terminal alive after agent exits by replacing with another shell.
 		command = "bash"
 		
 		// If task is provided, pass it as initial prompt to the agent (interactive mode)
@@ -108,7 +109,7 @@ func (m *Manager) Spawn(processID string, agent protocol.AgentType, worktreePath
 			}
 		}
 		
-		args = []string{"-l", "-c", fullCmd + "; exec bash -l"}
+		args = []string{"-i", "-l", "-c", fullCmd + "; exec bash -il"}
 	}
 
 	// Use defaults if not provided

@@ -1,15 +1,13 @@
 // Main App component
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import type { AgentType } from '@agenthq/shared';
-import { Menu } from 'lucide-react';
+import type { AgentType, Repo } from '@agenthq/shared';
 import { useWebSocket } from './hooks/useWebSocket';
 import { Sidebar } from './components/Sidebar';
-import { SplitTerminalContainer, createDefaultPaneState, type PaneLayoutState } from './components/SplitTerminalContainer';
+import { SplitTerminalContainer } from './components/SplitTerminalContainer';
 import { SpawnDialog } from './components/SpawnDialog';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { SettingsPage } from './components/SettingsPage';
-import { Button } from './components/ui/button';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './components/ui/resizable';
 import { cn } from './lib/utils';
 
@@ -36,23 +34,10 @@ export function App() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [spawnDialog, setSpawnDialog] = useState<{ worktreeId: string; envId: string; cols?: number; rows?: number } | null>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
-  
-  // Per-worktree pane layout state
-  const [paneStates, setPaneStates] = useState<Map<string, PaneLayoutState>>(new Map());
+  const [autoSelectProcessId, setAutoSelectProcessId] = useState<string | null>(null);
+  const [autoSelectedEnvIds, setAutoSelectedEnvIds] = useState<Set<string>>(new Set());
 
   const selectedWorktree = selectedWorktreeId ? worktrees.get(selectedWorktreeId) : null;
-  
-  // Get or create pane state for current worktree
-  const currentPaneState = selectedWorktreeId ? paneStates.get(selectedWorktreeId) ?? null : null;
-  
-  const handlePaneStateChange = useCallback((state: PaneLayoutState) => {
-    if (!selectedWorktreeId) return;
-    setPaneStates(prev => {
-      const next = new Map(prev);
-      next.set(selectedWorktreeId, state);
-      return next;
-    });
-  }, [selectedWorktreeId]);
 
   // Get processes for the selected worktree
   const worktreeProcesses = useMemo(() => {
@@ -65,15 +50,6 @@ export function App() {
     const isNewSelection = worktreeId !== selectedWorktreeId;
     setSelectedWorktreeId(worktreeId);
 
-    // Initialize pane state if it doesn't exist for this worktree
-    if (!paneStates.has(worktreeId)) {
-      setPaneStates(prev => {
-        const next = new Map(prev);
-        next.set(worktreeId, createDefaultPaneState());
-        return next;
-      });
-    }
-
     // Auto-open spawn dialog when selecting a worktree with no existing tabs
     if (isNewSelection) {
       const hasExistingProcesses = Array.from(processes.values()).some(p => p.worktreeId === worktreeId);
@@ -85,7 +61,50 @@ export function App() {
         }
       }
     }
-  }, [selectedWorktreeId, worktrees, environments, processes, paneStates]);
+  }, [selectedWorktreeId, worktrees, environments, processes]);
+
+  // Default-select first repo's main/master worktree on first load per environment
+  useEffect(() => {
+    if (selectedWorktreeId) return;
+    if (autoSelectedEnvIds.has(selectedEnvId)) return;
+
+    let cancelled = false;
+
+    const tryAutoSelect = async () => {
+      try {
+        const res = await fetch(`/api/repos?envId=${encodeURIComponent(selectedEnvId)}`);
+        if (!res.ok) return;
+        const repos = (await res.json()) as Repo[];
+        if (!Array.isArray(repos) || repos.length === 0) {
+          return;
+        }
+
+        const preferredRepo = repos[0];
+        if (!preferredRepo) {
+          return;
+        }
+
+        const mainWorktreeId =
+          selectedEnvId === 'local'
+            ? `main-${preferredRepo.name}`
+            : `main-${selectedEnvId}-${preferredRepo.name}`;
+
+        if (cancelled) return;
+        setSelectedWorktreeId((prev) => prev ?? mainWorktreeId);
+      } catch (err) {
+        console.error('Failed to auto-select default repo:', err);
+      } finally {
+        if (!cancelled) {
+          setAutoSelectedEnvIds((prev) => new Set([...prev, selectedEnvId]));
+        }
+      }
+    };
+
+    void tryAutoSelect();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedWorktreeId, autoSelectedEnvIds, selectedEnvId]);
 
   // Track worktree IDs that are pending (waiting for path to be set by daemon)
   const [pendingWorktreeId, setPendingWorktreeId] = useState<string | null>(null);
@@ -113,12 +132,6 @@ export function App() {
       if (res.ok) {
         const worktree = await res.json();
         setSelectedWorktreeId(worktree.id);
-        // Initialize pane state for the new worktree
-        setPaneStates(prev => {
-          const next = new Map(prev);
-          next.set(worktree.id, createDefaultPaneState());
-          return next;
-        });
         // Mark as pending - spawn dialog will open when path is set
         setPendingWorktreeId(worktree.id);
       } else {
@@ -164,7 +177,8 @@ export function App() {
       });
 
       if (res.ok) {
-        // Process will be added via WebSocket state
+        const newProcess = await res.json();
+        setAutoSelectProcessId(newProcess.id);
         setSpawnDialog(null);
       } else {
         const error = await res.json();
@@ -396,8 +410,8 @@ export function App() {
     <SplitTerminalContainer
       worktree={selectedWorktree ?? null}
       processes={worktreeProcesses}
-      paneState={currentPaneState}
-      onPaneStateChange={handlePaneStateChange}
+      autoSelectProcessId={autoSelectProcessId}
+      onAutoSelectComplete={() => setAutoSelectProcessId(null)}
       onInput={handleInput}
       onResize={handleResize}
       onPtyData={onPtyData}
@@ -407,6 +421,7 @@ export function App() {
       onViewDiff={handleViewDiff}
       onMerge={handleMerge}
       onMergeWithAgent={handleMergeWithAgent}
+      onOpenSidebar={() => setIsMobileSidebarOpen(true)}
     />
   );
 
@@ -421,8 +436,8 @@ export function App() {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden">
-      <div className="hidden h-full md:block">
+    <div className="h-screen w-screen overflow-hidden [height:100svh] [max-height:100svh]">
+      <div className="hidden h-full min-h-0 overflow-hidden md:block">
         <ResizablePanelGroup orientation="horizontal">
           {/* Sidebar */}
           <ResizablePanel defaultSize="256px" minSize="200px" maxSize="500px">
@@ -449,21 +464,8 @@ export function App() {
         </ResizablePanelGroup>
       </div>
 
-      <div className="relative flex h-full flex-col md:hidden">
-        <div className="z-30 flex h-12 items-center border-b border-border bg-background/95 px-3 backdrop-blur">
-          <Button
-            variant="secondary"
-            size="icon"
-            className="h-9 w-9 rounded-full shadow"
-            onClick={() => setIsMobileSidebarOpen(true)}
-            title="Open sidebar"
-            aria-label="Open sidebar"
-          >
-            <Menu className="h-4 w-4" />
-          </Button>
-        </div>
-
-        <div className="min-h-0 flex-1">
+      <div className="relative flex h-full min-h-0 flex-col overflow-hidden md:hidden">
+        <div className="min-h-0 flex-1 overflow-hidden">
           {terminalContent}
         </div>
 

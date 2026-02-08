@@ -1,7 +1,7 @@
 // Left sidebar with repo/worktree tree
 
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, Folder, GitBranch, Plus, Settings, Circle, RotateCcw, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Folder, GitBranch, Plus, Settings, Circle, RotateCcw, Trash2, X } from 'lucide-react';
 import type { Repo, Environment, Worktree, Process } from '@agenthq/shared';
 import { Button } from './ui/button';
 import { AddRepoDialog } from './AddRepoDialog';
@@ -119,6 +119,37 @@ export function Sidebar({
     }
   };
 
+  const handleDeleteRepo = async (repoName: string) => {
+    if (selectedEnvId !== 'local') {
+      alert('Removing repos is currently supported for Local environment only.');
+      return;
+    }
+
+    const confirmed = confirm(`Remove repository "${repoName}"?\n\nThis will remove the repository directory from the local workspace and close related tabs/worktrees.`);
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`/api/repos/${encodeURIComponent(repoName)}?envId=${encodeURIComponent(selectedEnvId)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Failed to remove repository');
+      }
+
+      setRepos((prev) => prev.filter((r) => r.name !== repoName));
+      setExpandedRepos((prev) => {
+        const next = new Set(prev);
+        next.delete(repoName);
+        return next;
+      });
+      await fetchRepos();
+    } catch (err) {
+      console.error('Failed to remove repo:', err);
+      alert(err instanceof Error ? err.message : 'Failed to remove repository');
+    }
+  };
+
   return (
     <div className="flex h-full flex-col border-r border-border bg-card">
       {/* Header with Environment Selector */}
@@ -197,18 +228,31 @@ export function Sidebar({
               return (
                 <div key={repo.name}>
                   {/* Repo header */}
-                  <button
-                    onClick={() => toggleRepo(repo.name)}
-                    className="flex w-full items-center gap-1 rounded px-2 py-1 text-sm hover:bg-accent"
-                  >
-                    {isExpanded ? (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  <div className="group flex items-center gap-1 rounded px-1 hover:bg-accent">
+                    <button
+                      onClick={() => toggleRepo(repo.name)}
+                      className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-1 text-sm"
+                    >
+                      {isExpanded ? (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      <Folder className="h-4 w-4 text-muted-foreground" />
+                      <span className="flex-1 truncate text-left">{repo.name}</span>
+                    </button>
+                    {selectedEnvId === 'local' && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 opacity-70 transition-opacity hover:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                        onClick={() => void handleDeleteRepo(repo.name)}
+                        title={`Remove ${repo.name}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     )}
-                    <Folder className="h-4 w-4 text-muted-foreground" />
-                    <span className="flex-1 truncate text-left">{repo.name}</span>
-                  </button>
+                  </div>
 
                   {/* Worktrees */}
                   {isExpanded && (

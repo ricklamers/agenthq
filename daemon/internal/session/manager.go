@@ -42,7 +42,9 @@ func NewManager(
 // Yolo mode flags for each agent CLI
 var agentYoloFlags = map[protocol.AgentType]string{
 	protocol.AgentClaudeCode:  "--dangerously-skip-permissions",
-	protocol.AgentCodexCLI:    "--full-auto",
+	// `--full-auto` is still sandboxed (workspace-write). For YOLO mode we need
+	// unrestricted execution to match user expectation.
+	protocol.AgentCodexCLI:    "--ask-for-approval never --sandbox danger-full-access",
 	protocol.AgentCursorAgent: "--force",
 	protocol.AgentKimiCLI:     "--yolo",
 }

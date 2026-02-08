@@ -126,6 +126,22 @@ pnpm --filter @agenthq/web build
 
 - After build completes, a manual browser reload picks up the new client bundle.
 
+### Deploy/Apply Change Checklist (Explicit)
+
+Use this to decide what to run after code changes in `/tmp/agenthq-test/agenthq`:
+
+| Change Type | Required Step(s) |
+|-------------|------------------|
+| **Frontend only** (`packages/web/**`) | Run `pnpm --filter @agenthq/web build` **only**. |
+| **Server only** (`packages/server/**`) | No rebuild needed in current dev setup (`tsx watch`); restart only if needed: `systemctl --user restart agenthq-server` |
+| **Daemon only** (`daemon/**`) | Rebuild/restart daemon: `make restart-daemon` or `systemctl --user restart agenthq-daemon` after rebuild workflow |
+| **Frontend + Server** | Run web build, and ensure server reflects changes (watch/restart if needed) |
+| **Frontend + Daemon** | Run web build and restart daemon |
+| **Server + Daemon** | Ensure server changes are active (watch/restart if needed) and restart daemon |
+| **All three** | Run web build, ensure server changes are active, restart daemon |
+
+Rule of thumb: **If changes are only about the frontend, only run the frontend build.**
+
 ### Current Product Behaviors Added in Live Dev
 
 - Mobile: sidebar is collapsible overlay.

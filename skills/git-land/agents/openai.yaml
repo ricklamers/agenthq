@@ -1,4 +1,0 @@
-interface:
-  display_name: "Git Land"
-  short_description: "Review, commit, and push git changes."
-  default_prompt: "Use this skill to land local git changes by analyzing diffs, staging intended files, writing a conventional commit message, and pushing to the remote branch."

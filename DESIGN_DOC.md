@@ -28,7 +28,7 @@ Browser-based control plane for managing coding agents (Claude Code, Codex CLI, 
 │       Go         │    │       Go         │
 │  • PTY manager   │    │  • PTY manager   │
 │  • Worktree mgmt │    │  • Worktree mgmt │
-│  • Dep checker   │    │  • Dep checker   │
+│  • Cmd runner    │    │  • Cmd runner    │
 └──────────────────┘    └──────────────────┘
 ```
 
@@ -57,8 +57,8 @@ This prevents screen tearing during rapid output from coding agents. Requires **
 
 | Component | Responsibilities |
 |-----------|------------------|
-| **server** | HTTP API, WebSocket hub, static file serving, state management |
-| **daemon** | PTY spawning, worktree operations, dependency checks, connects to server |
+| **server** | HTTP API, WebSocket hub, state management, serves built web assets when available |
+| **daemon** | PTY spawning, worktree operations, command execution, connects to server |
 | **web** | UI, terminal display, repo/worktree/process management |
 
 ## Configuration
@@ -74,15 +74,15 @@ This prevents screen tearing during rapid output from coding agents. Requires **
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `AGENTHQ_SERVER_URL` | Yes | WebSocket URL to connect to (e.g. `ws://localhost:3000/ws/daemon`) |
+| `AGENTHQ_SERVER_URL` | No | WebSocket URL to connect to (default: `ws://localhost:3000/ws/daemon`) |
 | `AGENTHQ_ENV_ID` | No | Environment ID (auto-generated if not set) |
-| `AGENTHQ_AUTH_TOKEN` | No | Auth token for remote daemon connections |
+| `AGENTHQ_AUTH_TOKEN` | No | Optional daemon auth token (sent as `?token=...`; enforced for non-local daemon connections) |
 
 ### Daemon CLI Flags
 
 | Flag | Description |
 |------|-------------|
-| `--workspace` | Path to workspace folder (required for remote daemons) |
+| `--workspace` | Path to workspace folder. Optional; when omitted, repo listing returns empty. |
 
 ## Data Model
 
@@ -127,23 +127,22 @@ $AGENTHQ_WORKSPACE/
 | Linux | arm64 | `agenthq-daemon-linux-arm64` |
 | Linux | amd64 | `agenthq-daemon-linux-amd64` |
 
-### Dependency Management
+### Runtime Requirements
 
-Daemon checks/installs dependencies deterministically on startup and before spawning agents.
+Daemon does not install dependencies. Required CLIs must already be available on `PATH`.
 
-**Core dependencies** (required):
+Core requirement:
 - `git`
-- `delta` (for diffs)
 
-**Agent-specific dependencies**:
-- `claude-code`: `claude` CLI
-- `codex-cli`: `codex` CLI
+Agent CLIs used by spawn commands:
+- `claude` (`claude-code`)
+- `codex` (`codex-cli`)
+- `cursor-agent` (`cursor-agent`)
+- `kimi` (`kimi-cli`)
+- `droid` (`droid-cli`)
+- `bash` (`bash`/`shell`)
 
-**Install methods** (deterministic, not AI-based):
-- macOS: `brew install <pkg>`
-- Linux (Debian/Ubuntu): `apt-get install <pkg>`
-- Linux (other): download from GitHub releases
-- Fallback: download binary from GitHub releases
+Daemon currently advertises capabilities: `bash`, `claude-code`, `codex-cli`, `cursor-agent`.
 
 ### Worktree Management
 
@@ -156,6 +155,7 @@ git worktree add .agenthq-worktrees/<worktree-id> -b agent/<worktree-id>
 Branch naming:
 - Initial: `agent/<worktree-id>`
 - Agent renames to meaningful name (e.g., `feature/add-dark-mode`)
+- Server creates a temporary placeholder branch value until daemon sends `worktree-ready` with final branch.
 
 Main worktree (the repo root) is always available — no need to create a worktree to run processes.
 
@@ -192,16 +192,16 @@ Main worktree (the repo root) is always available — no need to create a worktr
 [Daemon: spawn bash in same worktree PTY]
         │
         ▼
-[User: clicks "View Diff"]
+[User: triggers diff]
         │
         ▼
-[Daemon: runs "git diff main | delta" in worktree, streams to browser]
+[Server: instructs daemon to spawn shell in worktree running "git diff main --stat && echo '---' && git diff main"]
         │
         ▼
-[User: clicks "Merge"]
+[User: triggers merge]
         │
         ▼
-[Server: git merge in main worktree]
+[Server: instructs daemon to spawn shell in main worktree to run merge]
         │
         ▼
 [User: clicks "Archive Worktree"]
@@ -218,16 +218,15 @@ Main worktree (the repo root) is always available — no need to create a worktr
 |-----------|------|---------|
 | D→S | `register` | `{ envId, envName, capabilities[], workspace? }` |
 | D→S | `heartbeat` | `{}` |
-| D→S | `pty-data` | `{ processId, data }` |
-| D→S | `buffer-clear` | `{ processId }` |
+| D→S | `pty-data` | `{ processId, data }` (`data` is base64-encoded PTY bytes) |
 | D→S | `process-started` | `{ processId }` |
 | D→S | `process-exit` | `{ processId, exitCode }` |
-| D→S | `branch-changed` | `{ worktreeId, branch }` |
+| D→S | `branch-changed` | `{ worktreeId, branch }` (reserved; not currently emitted) |
 | D→S | `worktree-ready` | `{ worktreeId, path, branch }` |
 | D→S | `repos-list` | `{ repos: [{ name, path, defaultBranch }] }` |
 | S→D | `create-worktree` | `{ worktreeId, repoName, repoPath }` |
-| S→D | `spawn` | `{ processId, worktreeId, worktreePath, agent, args[], task?, cols?, rows?, yoloMode? }` |
-| S→D | `pty-input` | `{ processId, data }` |
+| S→D | `spawn` | `{ processId, worktreeId, worktreePath, agent, args[], task?, cols?, rows?, yoloMode? }` (`args[]` currently ignored by daemon) |
+| S→D | `pty-input` | `{ processId, data }` (`data` is base64-encoded input bytes) |
 | S→D | `resize` | `{ processId, cols, rows }` |
 | S→D | `kill` | `{ processId }` |
 | S→D | `remove-worktree` | `{ worktreeId, worktreePath }` |
@@ -246,8 +245,13 @@ Main worktree (the repo root) is always available — no need to create a worktr
 | S→B | `process-removed` | `{ processId }` |
 | S→B | `worktree-update` | `{ worktree }` |
 | S→B | `worktree-removed` | `{ worktreeId }` |
-| S→B | `env-update` | `{ environments[] }` |
+| S→B | `env-update` | `{ environments }` |
 | S→B | `error` | `{ message }` |
+
+Notes:
+- Daemon ↔ server PTY payloads use base64 strings; server decodes to plain text for browser clients and encodes browser input before forwarding to daemon.
+- On daemon register, server reconciles `envId`/`envName` against configured environments and may remap to a configured environment ID.
+- For `local`, repo discovery is server-side from `AGENTHQ_WORKSPACE`; daemon `repos-list` is used for non-local environments.
 
 ## HTTP API
 
@@ -256,9 +260,9 @@ Main worktree (the repo root) is always available — no need to create a worktr
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/repos?envId=` | List repos (optionally filtered by env) |
-| POST | `/api/repos` | Clone repo `{ url }` (stub) |
+| POST | `/api/repos` | Clone public GitHub repo into local workspace. Body: `{ url, envId? }` (defaults to `local`; only local supported). Returns `201` Repo. |
 | GET | `/api/repos/:name?envId=` | Repo details |
-| DELETE | `/api/repos/:name` | Remove repo (stub) |
+| DELETE | `/api/repos/:name?envId=` | Remove repo (local only). Deletes repo dir, removes related worktrees/processes, notifies daemon. Returns `{ success: true }`. |
 
 ### Worktrees
 
@@ -288,8 +292,8 @@ Main worktree (the repo root) is always available — no need to create a worktr
 | GET | `/api/environments` | List all environments |
 | GET | `/api/environments/:envId` | Get environment |
 | POST | `/api/environments` | Create exe.dev environment `{ name, vmName }` |
-| DELETE | `/api/environments/:envId` | Delete environment (destroys VM for exe type) |
-| POST | `/api/environments/:envId/provision` | Provision exe.dev environment (upload daemon, create workspace) |
+| DELETE | `/api/environments/:envId` | Local: disconnect daemon but keep config. Exe: stop processes, close WS, destroy VM (if present), remove config. |
+| POST | `/api/environments/:envId/provision` | Exe only. Requires server public URL. Uploads daemon, creates `/workspace`, disables exe.dev banner, creates a test repo, starts daemon. |
 | POST | `/api/environments/:envId/update-daemon` | Update daemon on exe.dev environment |
 | POST | `/api/environments/:envId/restart` | Restart daemon |
 
@@ -313,33 +317,32 @@ Main worktree (the repo root) is always available — no need to create a worktr
 | Droid CLI | `droid` | No | Supported |
 | Terminal | `bash` / `shell` | No | Supported |
 
-Tasks are passed via the `task` field in the spawn message. For shell agents, the task is executed as a command. For coding agents, it's passed as the initial prompt.
+Tasks are passed via the `task` field in the spawn message. For shell agents, the task is executed as a command. For coding agents, it's passed as the initial prompt. (Current UI spawn dialog does not expose a free-form prompt field.)
 
 ## UI/UX
 
 ### Layout
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│  Agent HQ                                            [+ Add Repo]        │
-├─────────────────┬────────────────────────────────────────────────────────┤
-│                 │  [claude ▼] [bash ▼] [codex ▼]             [+ New Tab] │
-│  REPOS          ├────────────────────────────────────────────────────────┤
-│                 │                                                        │
-│  ▼ project-a    │  ┌────────────────────────────────────────────────────┐│
-│    ├ main       │  │                                                    ││
-│    ├ agent/abc  │◄─│  $ claude                                          ││
-│    └ feat/dark  │  │  ╭────────────────────────────────────────────╮    ││
-│    [+ Worktree] │  │  │ What would you like to do?                 │    ││
-│                 │  │  ╰────────────────────────────────────────────╯    ││
-│  ▼ project-b    │  │                                                    ││
-│    └ main       │  │  > Add dark mode support to the settings page     ││
-│                 │  │                                                    ││
-│                 │  └────────────────────────────────────────────────────┘│
-│                 │                                                        │
-│  [Environments] │  [View Diff]  [Merge]  [Archive Worktree]              │
-└─────────────────┴────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│ [claude] [bash] [codex]                                        [New Tab]  │
+├─────────────────┬──────────────────────────────────────────────────────────┤
+│ Environment: ▼  │                                                          │
+│ ● Connected     │  ┌────────────────────────────────────────────────────┐  │
+│                 │  │                                                    │  │
+│ REPOS        [+]│  │                    Terminal                        │  │
+│ ▼ project-a     │  │                                                    │  │
+│   ├ main        │  └────────────────────────────────────────────────────┘  │
+│   └ agent/abc   │                                                          │
+│   [+ Worktree]  │  [Agent Merge] [Archive Worktree] (non-main only)       │
+└─────────────────┴──────────────────────────────────────────────────────────┘
 ```
+
+### Mobile
+
+- Sidebar is hidden by default on mobile (`max-width: 767px`).
+- A menu button in the tab bar opens the sidebar as a slide-in overlay.
+- A dimmed backdrop closes the sidebar.
 
 ### Left Sidebar
 
@@ -361,29 +364,34 @@ REPOS
 - **Repos**: Top-level groups, collapsible
 - **Worktrees**: Nested under each repo, includes main + additional worktrees
 - **[+ New Worktree]**: Button under each repo to create worktree
+- **[+ Add Repo]**: Icon button in the REPOS section header
+- **Environment selector**: Dropdown in sidebar header; repo/worktree list is scoped to selected environment
+- **Connection status**: Connected/Disconnected indicator for selected environment
 - Selecting a worktree shows its processes as tabs in main area
 - Visual indicators: process count badge, branch name
+- Add/Remove Repo actions are currently local-environment only
+- Add Repo uses a modal dialog (no browser prompt) and accepts GitHub HTTPS/SSH URLs
 
 ### Main Area
 
 When a worktree is selected:
 
 - **Tab bar**: Each tab is a process (agent or shell) in the selected worktree
-- **[+ New Tab]**: Dropdown to spawn new process in current worktree:
-  - **bash** — plain shell
-  - **Claude Code** — opens spawn dialog, then starts `claude` CLI
-  - **Codex CLI** — opens spawn dialog, then starts `codex` CLI
+- **[New Tab]**: Opens spawn dialog for current worktree
 - **Terminal**: xterm.js rendering the selected process's PTY output
-- **Action bar**: View Diff, Merge, Archive Worktree buttons
+- **Action bar**: Agent Merge and Archive Worktree buttons (shown only for non-main worktrees)
 
 ### Spawn Agent Dialog
 
-When spawning a code agent (not bash), dialog prompts for:
+Spawn dialog shows agent tiles plus Yolo Mode toggle:
 
-| Field | Description |
-|-------|-------------|
-| **Model** | Dropdown of available models (e.g., `opus`, `sonnet`, `gpt-4o`) |
-| **Initial Prompt** | Text area for the task/prompt to start the agent with |
+- Terminal (bash)
+- Claude Code
+- Codex CLI
+- Cursor Agent
+- Droid CLI
+- Kimi CLI
+- Yolo Mode toggle (skip permission prompts)
 
 ### Interactions
 
@@ -391,11 +399,11 @@ When spawning a code agent (not bash), dialog prompts for:
 |--------|--------|
 | Click worktree in sidebar | Main area shows tabs (processes) for that worktree |
 | Click tab | Switch to that process's terminal |
-| Click "+ New Tab" → bash | Spawns shell in current worktree |
-| Click "+ New Tab" → Agent | Opens spawn dialog, then starts agent in worktree |
-| Click "+ New Worktree" | Creates worktree, selects it, shows empty tab bar |
-| Click "View Diff" | Opens new tab running `git diff main \| delta` |
-| Click "Merge" | Merges worktree branch into base branch |
+| Click "New Tab" | Opens spawn dialog for the selected worktree |
+| Select agent in spawn dialog | Spawns process in current worktree |
+| Click "+ New Worktree" | Creates worktree, selects it, then auto-opens spawn dialog when ready |
+| Click empty worktree | Auto-opens spawn dialog |
+| Click "Agent Merge" | Runs merge-with-agent flow for selected worktree |
 | Click "Archive Worktree" | Kills all processes, removes worktree |
 
 ## Build Phases
@@ -409,7 +417,7 @@ When spawning a code agent (not bash), dialog prompts for:
 | 5 | Repo management | Clone from URL, list repos, workspace UI |
 | 6 | Agent spawning | Spawn claude-code/codex-cli, agent selection UI |
 | 7 | Worktree integration | Create worktree per session, branch tracking |
-| 8 | Diff/merge flow | Delta diff in terminal, local merge |
+| 8 | Diff/merge flow | Terminal diff task + merge / merge-with-agent flows |
 | 9 | Multi-environment | Daemon registration, environment selection |
 | 10 | Polish | Reconnection, buffer persistence, compression |
 
@@ -419,7 +427,7 @@ When spawning a code agent (not bash), dialog prompts for:
 
 - **Shared types**: Protocol messages shared between server and web
 - **Atomic changes**: Update server API and web client in one commit
-- **Simplified dev**: One `pnpm dev` starts everything
+- **Simplified dev**: `pnpm dev` starts server + web; daemon runs separately
 - **Easier refactoring**: Move code between packages without repo juggling
 
 ### Package Structure
@@ -446,7 +454,7 @@ packages:
 // package.json (root)
 {
   "scripts": {
-    "dev": "concurrently \"pnpm --filter @agenthq/server dev\" \"pnpm --filter @agenthq/web dev\"",
+    "dev": "concurrently -n server,web -c blue,green \"pnpm --filter @agenthq/server dev\" \"pnpm --filter @agenthq/web dev\"",
     "build": "pnpm -r build",
     "build:daemon": "cd daemon && make build",
     "build:daemon:all": "cd daemon && make build-all",
@@ -455,6 +463,11 @@ packages:
   }
 }
 ```
+
+Dev runtime topology:
+- `pnpm dev` runs server (`:3000`) and Vite web (`:5173`).
+- In development, Vite proxies `/api` and `/ws` to the server.
+- Server-side static asset serving is used when a built web `dist` is present.
 
 ### Dependency Flow
 
@@ -522,18 +535,18 @@ interface Repo {
 export type DaemonToServerMessage =
   | { type: 'register'; envId: string; envName: string; capabilities: string[]; workspace?: string }
   | { type: 'heartbeat' }
-  | { type: 'pty-data'; processId: string; data: string }
-  | { type: 'buffer-clear'; processId: string }
+  | { type: 'pty-data'; processId: string; data: string } // base64-encoded bytes
+  | { type: 'buffer-clear'; processId: string } // defined in shared types; not handled by daemon/server runtime
   | { type: 'process-started'; processId: string }
   | { type: 'process-exit'; processId: string; exitCode: number }
   | { type: 'worktree-ready'; worktreeId: string; path: string; branch: string }
-  | { type: 'branch-changed'; worktreeId: string; branch: string }
+  | { type: 'branch-changed'; worktreeId: string; branch: string } // reserved, not currently emitted
   | { type: 'repos-list'; repos: Array<{ name: string; path: string; defaultBranch: string }> };
 
 export type ServerToDaemonMessage =
   | { type: 'create-worktree'; worktreeId: string; repoName: string; repoPath: string }
-  | { type: 'spawn'; processId: string; worktreeId: string; worktreePath: string; agent: AgentType; args: string[]; task?: string; cols?: number; rows?: number; yoloMode?: boolean }
-  | { type: 'pty-input'; processId: string; data: string }
+  | { type: 'spawn'; processId: string; worktreeId: string; worktreePath: string; agent: AgentType; args: string[]; task?: string; cols?: number; rows?: number; yoloMode?: boolean } // args currently ignored by daemon
+  | { type: 'pty-input'; processId: string; data: string } // base64-encoded bytes
   | { type: 'resize'; processId: string; cols: number; rows: number }
   | { type: 'kill'; processId: string }
   | { type: 'remove-worktree'; worktreeId: string; worktreePath: string }

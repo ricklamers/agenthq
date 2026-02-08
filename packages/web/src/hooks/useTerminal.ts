@@ -81,6 +81,8 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
   const fitAddonRef = useRef<FitAddon | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fitRafRef = useRef<number | null>(null);
+  const wheelHandlerRef = useRef<((e: WheelEvent) => void) | null>(null);
+  const touchCleanupRef = useRef<(() => void) | null>(null);
   const onDataRef = useRef(options.onData);
   const onResizeRef = useRef(options.onResize);
   const [isReady, setIsReady] = useState(false);
@@ -93,6 +95,12 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
       window.cancelAnimationFrame(fitRafRef.current);
       fitRafRef.current = null;
     }
+    if (wheelHandlerRef.current && containerRef.current) {
+      containerRef.current.removeEventListener('wheel', wheelHandlerRef.current);
+      wheelHandlerRef.current = null;
+    }
+    touchCleanupRef.current?.();
+    touchCleanupRef.current = null;
     xtermRef.current?.dispose();
     xtermRef.current = null;
     fitAddonRef.current = null;
@@ -135,6 +143,55 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     terminal.open(node);
     fitAddonRef.current = fitAddon;
     xtermRef.current = terminal;
+
+    // WebGL canvas eats wheel/touch events — manually scroll the buffer
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const lines = Math.round(e.deltaY / 20);
+      terminal.scrollLines(lines);
+    };
+    node.addEventListener('wheel', handleWheel, { passive: false });
+    wheelHandlerRef.current = handleWheel;
+
+    // Touch drag to scroll
+    let touchStartY: number | null = null;
+    let accumDelta = 0;
+    const lineHeight = Math.ceil((terminal.options.fontSize ?? 14) * 1.2);
+
+    const handleTouchStart = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      if (e.touches.length === 1 && touch) {
+        touchStartY = touch.clientY;
+        accumDelta = 0;
+      }
+    };
+    const handleTouchMove = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      if (touchStartY === null || e.touches.length !== 1 || !touch) return;
+      e.preventDefault();
+      const currentY = touch.clientY;
+      const deltaY = touchStartY - currentY;
+      touchStartY = currentY;
+      accumDelta += deltaY;
+      const lines = Math.trunc(accumDelta / lineHeight);
+      if (lines !== 0) {
+        accumDelta -= lines * lineHeight;
+        terminal.scrollLines(lines);
+      }
+    };
+    const handleTouchEnd = () => {
+      touchStartY = null;
+      accumDelta = 0;
+    };
+
+    node.addEventListener('touchstart', handleTouchStart, { passive: true });
+    node.addEventListener('touchmove', handleTouchMove, { passive: false });
+    node.addEventListener('touchend', handleTouchEnd, { passive: true });
+    touchCleanupRef.current = () => {
+      node.removeEventListener('touchstart', handleTouchStart);
+      node.removeEventListener('touchmove', handleTouchMove);
+      node.removeEventListener('touchend', handleTouchEnd);
+    };
 
     terminal.onData((data) => {
       onDataRef.current?.(data);

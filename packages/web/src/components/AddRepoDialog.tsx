@@ -61,9 +61,9 @@ export function AddRepoDialog({ open, onClose, onSubmit }: AddRepoDialogProps) {
                 <Github className="h-5 w-5" />
               </div>
               <div className="flex flex-col gap-1 pt-0.5">
-                <AlertDialogTitle>Add Public GitHub Repo</AlertDialogTitle>
+                <AlertDialogTitle>Add GitHub Repo</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Paste a public GitHub URL and Agent HQ will clone it into your local workspace.
+                  Paste a GitHub URL and Agent HQ will clone it into your local workspace. Use an SSH URL for private repos.
                 </AlertDialogDescription>
               </div>
             </div>
@@ -77,11 +77,11 @@ export function AddRepoDialog({ open, onClose, onSubmit }: AddRepoDialogProps) {
               <Link2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 id="repo-url"
-                type="url"
+                type="text"
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
                 autoFocus
-                placeholder="https://github.com/owner/repo"
+                placeholder="https://github.com/owner/repo or git@github.com:owner/repo.git"
                 className={cn(
                   'w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm text-foreground',
                   'focus:outline-none focus:ring-2 focus:ring-ring',
@@ -93,7 +93,7 @@ export function AddRepoDialog({ open, onClose, onSubmit }: AddRepoDialogProps) {
               <p className="mt-2 text-xs text-destructive">{error}</p>
             ) : (
               <p className="mt-2 text-xs text-muted-foreground">
-                Supported for now: public GitHub HTTPS URLs only.
+                Supports GitHub HTTPS and SSH URLs.
               </p>
             )}
           </div>

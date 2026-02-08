@@ -177,11 +177,11 @@ export function SplitTerminalContainer({
 
       <div className="h-0 min-h-0 flex-1 overflow-hidden">
         {!worktree ? (
-          <div className="flex h-full items-center justify-center bg-[#0a0a0a]">
+          <div className="flex h-full items-center justify-center bg-terminal-bg">
             <span className="text-muted-foreground">Select a worktree to view processes</span>
           </div>
         ) : processes.length === 0 ? (
-          <div className="flex h-full items-center justify-center bg-[#0a0a0a]">
+          <div className="flex h-full items-center justify-center bg-terminal-bg">
             <span className="text-muted-foreground">Click "+ New Tab" to spawn a process</span>
           </div>
         ) : (

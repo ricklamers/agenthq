@@ -3,6 +3,10 @@
 import { useState, useEffect } from 'react';
 import type { Environment } from '@agenthq/shared';
 import { Button } from './ui/button';
+import { useTheme } from '@/hooks/useTheme';
+import type { Theme } from '@/hooks/useTheme';
+import { Sun, Moon, Monitor } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface Config {
   hasDaemonAuthToken: boolean;
@@ -15,7 +19,14 @@ interface SettingsPageProps {
   environments: Environment[];
 }
 
+const themeOptions: { value: Theme; label: string; icon: typeof Sun }[] = [
+  { value: 'system', label: 'System', icon: Monitor },
+  { value: 'light', label: 'Light', icon: Sun },
+  { value: 'dark', label: 'Dark', icon: Moon },
+];
+
 export function SettingsPage({ onBack, environments }: SettingsPageProps) {
+  const { theme, setTheme } = useTheme();
   const [config, setConfig] = useState<Config | null>(null);
   const [daemonAuthToken, setDaemonAuthToken] = useState('');
   const [serverUrl, setServerUrl] = useState('');
@@ -221,6 +232,38 @@ export function SettingsPage({ onBack, environments }: SettingsPageProps) {
       {/* Content */}
       <div className="flex-1 overflow-auto p-4">
         <div className="mx-auto max-w-2xl space-y-8">
+          {/* Appearance */}
+          <section>
+            <h2 className="mb-4 text-base font-semibold">Appearance</h2>
+            <div className="rounded-lg border border-border bg-card p-4">
+              <label className="mb-3 block text-sm font-medium">Theme</label>
+              <div className="inline-flex rounded-lg border border-border p-1">
+                {themeOptions.map((opt) => {
+                  const Icon = opt.icon;
+                  const isActive = theme === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => setTheme(opt.value)}
+                      className={cn(
+                        'flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                        isActive
+                          ? 'bg-accent text-accent-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                Choose your preferred color scheme. System uses your OS setting.
+              </p>
+            </div>
+          </section>
+
           {/* exe.dev Configuration */}
           <section>
             <h2 className="mb-4 text-base font-semibold">exe.dev Configuration</h2>

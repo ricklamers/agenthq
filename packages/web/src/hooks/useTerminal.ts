@@ -1,16 +1,70 @@
 // xterm.js terminal hook
 
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
-import { SerializeAddon } from '@xterm/addon-serialize';
 import '@xterm/xterm/css/xterm.css';
+
+import type { ResolvedTheme } from './useTheme';
+
+const darkTerminalTheme = {
+  background: '#000000',
+  foreground: '#fafafa',
+  cursor: '#fafafa',
+  cursorAccent: '#0a0a0a',
+  selectionBackground: '#3f3f46',
+  black: '#18181b',
+  red: '#ef4444',
+  green: '#22c55e',
+  yellow: '#eab308',
+  blue: '#3b82f6',
+  magenta: '#a855f7',
+  cyan: '#06b6d4',
+  white: '#fafafa',
+  brightBlack: '#71717a',
+  brightRed: '#f87171',
+  brightGreen: '#4ade80',
+  brightYellow: '#facc15',
+  brightBlue: '#60a5fa',
+  brightMagenta: '#c084fc',
+  brightCyan: '#22d3ee',
+  brightWhite: '#ffffff',
+};
+
+const lightTerminalTheme = {
+  background: '#ffffff',
+  foreground: '#1a1a1a',
+  cursor: '#1a1a1a',
+  cursorAccent: '#ffffff',
+  selectionBackground: '#b4d5fe',
+  black: '#1a1a1a',
+  red: '#dc2626',
+  green: '#16a34a',
+  yellow: '#ca8a04',
+  blue: '#2563eb',
+  magenta: '#9333ea',
+  cyan: '#0891b2',
+  white: '#e5e5e5',
+  brightBlack: '#737373',
+  brightRed: '#ef4444',
+  brightGreen: '#22c55e',
+  brightYellow: '#eab308',
+  brightBlue: '#3b82f6',
+  brightMagenta: '#a855f7',
+  brightCyan: '#06b6d4',
+  brightWhite: '#ffffff',
+};
+
+function getTerminalTheme(resolvedTheme: ResolvedTheme) {
+  return resolvedTheme === 'dark' ? darkTerminalTheme : lightTerminalTheme;
+}
 
 interface UseTerminalOptions {
   onData?: (data: string) => void;
   onResize?: (cols: number, rows: number) => void;
+  resolvedTheme?: ResolvedTheme;
 }
 
 interface UseTerminalReturn {
@@ -18,58 +72,88 @@ interface UseTerminalReturn {
   write: (data: string) => void;
   fit: () => void;
   focus: () => void;
-  scrollLines: (lines: number) => void;
-  keyboardInsetPx: number;
   clear: () => void;
   getDimensions: () => { cols: number; rows: number } | null;
-  serialize: () => string | null;
-  restore: (data: string) => void;
   isReady: boolean;
 }
 
 export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn {
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const serializeAddonRef = useRef<SerializeAddon | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const visualViewportCleanupRef = useRef<(() => void) | null>(null);
+  const fitRafRef = useRef<number | null>(null);
+  const fitTimeoutRef = useRef<number | null>(null);
+  const windowResizeListenerRef = useRef<(() => void) | null>(null);
+  const fontLoadingDoneListenerRef = useRef<(() => void) | null>(null);
+  const lastContainerSizeRef = useRef<{ width: number; height: number } | null>(null);
   const onDataRef = useRef(options.onData);
   const onResizeRef = useRef(options.onResize);
   const lastResizeSentRef = useRef<{ cols: number; rows: number } | null>(null);
-  const keyboardInsetRef = useRef(0);
-  const viewportStateRef = useRef({
-    isMobile: false,
-    keyboardLikelyOpen: false,
-    maxViewportHeight: 0,
-    suppressResizeUntil: 0,
-  });
-  
-  // Track when terminal is fully initialized and ready to receive data
   const [isReady, setIsReady] = useState(false);
-  const [keyboardInsetPx, setKeyboardInsetPx] = useState(0);
 
-  // Keep refs updated
   onDataRef.current = options.onData;
   onResizeRef.current = options.onResize;
 
-  // Use callback ref to initialize terminal when DOM element is available
+  const cleanupTerminal = useCallback(() => {
+    resizeObserverRef.current?.disconnect();
+    resizeObserverRef.current = null;
+    if (fitRafRef.current !== null) {
+      window.cancelAnimationFrame(fitRafRef.current);
+      fitRafRef.current = null;
+    }
+    if (fitTimeoutRef.current !== null) {
+      window.clearTimeout(fitTimeoutRef.current);
+      fitTimeoutRef.current = null;
+    }
+    if (windowResizeListenerRef.current) {
+      window.removeEventListener('resize', windowResizeListenerRef.current);
+      windowResizeListenerRef.current = null;
+    }
+    if (fontLoadingDoneListenerRef.current && 'fonts' in document) {
+      document.fonts.removeEventListener('loadingdone', fontLoadingDoneListenerRef.current);
+      fontLoadingDoneListenerRef.current = null;
+    }
+    xtermRef.current?.dispose();
+    xtermRef.current = null;
+    fitAddonRef.current = null;
+    lastResizeSentRef.current = null;
+    lastContainerSizeRef.current = null;
+    setIsReady(false);
+  }, []);
+
+  const fit = useCallback(() => {
+    fitAddonRef.current?.fit();
+  }, []);
+
+  const scheduleFit = useCallback(() => {
+    if (!fitAddonRef.current) return;
+    if (fitRafRef.current !== null) {
+      window.cancelAnimationFrame(fitRafRef.current);
+    }
+    fitRafRef.current = window.requestAnimationFrame(() => {
+      fitRafRef.current = null;
+      fitAddonRef.current?.fit();
+    });
+  }, []);
+
+  const scheduleSettledFit = useCallback(() => {
+    if (!fitAddonRef.current) return;
+    if (fitTimeoutRef.current !== null) {
+      window.clearTimeout(fitTimeoutRef.current);
+    }
+    fitTimeoutRef.current = window.setTimeout(() => {
+      fitTimeoutRef.current = null;
+      fitAddonRef.current?.fit();
+    }, 120);
+  }, []);
+
   const terminalRef = useCallback((node: HTMLDivElement | null) => {
-    // Cleanup previous terminal if container changes
     if (containerRef.current && containerRef.current !== node) {
-      resizeObserverRef.current?.disconnect();
-      visualViewportCleanupRef.current?.();
-      visualViewportCleanupRef.current = null;
-      xtermRef.current?.dispose();
-      xtermRef.current = null;
-      fitAddonRef.current = null;
-      keyboardInsetRef.current = 0;
-      setKeyboardInsetPx(0);
-      setIsReady(false);
+      cleanupTerminal();
     }
 
     containerRef.current = node;
-
     if (!node || xtermRef.current) return;
 
     const terminal = new Terminal({
@@ -77,46 +161,16 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
       cursorBlink: true,
       fontSize: 14,
       fontFamily: '"JetBrains Mono", Menlo, Monaco, "Courier New", monospace',
-      theme: {
-        background: '#000000',
-        foreground: '#fafafa',
-        cursor: '#fafafa',
-        cursorAccent: '#0a0a0a',
-        selectionBackground: '#3f3f46',
-        black: '#18181b',
-        red: '#ef4444',
-        green: '#22c55e',
-        yellow: '#eab308',
-        blue: '#3b82f6',
-        magenta: '#a855f7',
-        cyan: '#06b6d4',
-        white: '#fafafa',
-        brightBlack: '#71717a',
-        brightRed: '#f87171',
-        brightGreen: '#4ade80',
-        brightYellow: '#facc15',
-        brightBlue: '#60a5fa',
-        brightMagenta: '#c084fc',
-        brightCyan: '#22d3ee',
-        brightWhite: '#ffffff',
-      },
+      theme: getTerminalTheme(options.resolvedTheme ?? 'dark'),
     });
 
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
 
-    // Load serialize addon for saving/restoring terminal state
-    const serializeAddon = new SerializeAddon();
-    terminal.loadAddon(serializeAddon);
-    serializeAddonRef.current = serializeAddon;
-
-    // Load Unicode11 addon for proper character width calculation
-    // Required for rendering Unicode box-drawing/block characters correctly
     const unicode11Addon = new Unicode11Addon();
     terminal.loadAddon(unicode11Addon);
     terminal.unicode.activeVersion = '11';
 
-    // Try to load WebGL addon for better performance
     try {
       const webglAddon = new WebglAddon();
       terminal.loadAddon(webglAddon);
@@ -128,67 +182,14 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     }
 
     terminal.open(node);
+    fitAddonRef.current = fitAddon;
     fitAddon.fit();
 
-    if (typeof window !== 'undefined') {
-      const isMobile = window.matchMedia('(max-width: 767px)').matches;
-      viewportStateRef.current.isMobile = isMobile;
-
-      const visualViewport = window.visualViewport;
-      if (isMobile && visualViewport) {
-        const updateKeyboardState = () => {
-          const state = viewportStateRef.current;
-          const scale = visualViewport.scale ?? 1;
-          const isZoomed = Math.abs(scale - 1) > 0.05;
-
-          if (visualViewport.height > state.maxViewportHeight) {
-            state.maxViewportHeight = visualViewport.height;
-          }
-
-          const previous = state.keyboardLikelyOpen;
-          const rawInset = Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop);
-          const keyboardLikelyOpen = !isZoomed
-            && state.maxViewportHeight > 0
-            ? visualViewport.height < state.maxViewportHeight - 120 && rawInset > 80
-            : false;
-
-          state.keyboardLikelyOpen = keyboardLikelyOpen;
-          const nextInsetPx = keyboardLikelyOpen ? rawInset : 0;
-          if (Math.abs(nextInsetPx - keyboardInsetRef.current) >= 1) {
-            keyboardInsetRef.current = nextInsetPx;
-            setKeyboardInsetPx(nextInsetPx);
-          }
-
-          if (keyboardLikelyOpen !== previous) {
-            // Ignore transient mobile keyboard viewport changes.
-            state.suppressResizeUntil = Date.now() + 700;
-          }
-        };
-
-        updateKeyboardState();
-        visualViewport.addEventListener('resize', updateKeyboardState);
-        visualViewport.addEventListener('scroll', updateKeyboardState);
-        visualViewportCleanupRef.current = () => {
-          visualViewport.removeEventListener('resize', updateKeyboardState);
-          visualViewport.removeEventListener('scroll', updateKeyboardState);
-        };
-      }
-    }
-
-    // Handle user input via ref to avoid re-subscribing
     terminal.onData((data) => {
       onDataRef.current?.(data);
     });
 
-    // Handle resize via ref
     terminal.onResize(({ cols, rows }) => {
-      const viewportState = viewportStateRef.current;
-      const shouldSuppressForMobileKeyboard = viewportState.isMobile
-        && (viewportState.keyboardLikelyOpen || Date.now() < viewportState.suppressResizeUntil);
-      if (shouldSuppressForMobileKeyboard) {
-        return;
-      }
-
       const last = lastResizeSentRef.current;
       if (last && last.cols === cols && last.rows === rows) {
         return;
@@ -198,58 +199,63 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     });
 
     xtermRef.current = terminal;
-    fitAddonRef.current = fitAddon;
 
-    // Resize observer
-    const resizeObserver = new ResizeObserver(() => {
-      const viewportState = viewportStateRef.current;
-      const shouldSuppressForMobileKeyboard = viewportState.isMobile
-        && (viewportState.keyboardLikelyOpen || Date.now() < viewportState.suppressResizeUntil);
-      if (shouldSuppressForMobileKeyboard) {
+    // Run an additional fit pass after layout settles.
+    scheduleFit();
+    scheduleSettledFit();
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+
+      const width = Math.round(entry.contentRect.width);
+      const height = Math.round(entry.contentRect.height);
+      const last = lastContainerSizeRef.current;
+      if (last && last.width === width && last.height === height) {
         return;
       }
-      fitAddon.fit();
+
+      lastContainerSizeRef.current = { width, height };
+      scheduleFit();
+      scheduleSettledFit();
     });
     resizeObserver.observe(node);
     resizeObserverRef.current = resizeObserver;
-    
-    // Mark terminal as ready after a short delay to ensure layout is stable
-    // This prevents subscribing to PTY data before the terminal can render it
-    setTimeout(() => {
-      // Double-check terminal still exists (might have been cleaned up)
-      if (xtermRef.current) {
-        fitAddon.fit();
-        setIsReady(true);
-      }
-    }, 50);
-  }, []);
+
+    const handleWindowResize = () => {
+      scheduleFit();
+      scheduleSettledFit();
+    };
+    window.addEventListener('resize', handleWindowResize);
+    windowResizeListenerRef.current = handleWindowResize;
+
+    if ('fonts' in document) {
+      const handleFontLoadingDone = () => {
+        scheduleFit();
+        scheduleSettledFit();
+      };
+      document.fonts.addEventListener('loadingdone', handleFontLoadingDone);
+      document.fonts.ready.then(() => {
+        scheduleFit();
+        scheduleSettledFit();
+      });
+      fontLoadingDoneListenerRef.current = handleFontLoadingDone;
+    }
+
+    setIsReady(true);
+  }, [cleanupTerminal, scheduleFit, scheduleSettledFit]);
 
   const write = useCallback((data: string) => {
-    const term = xtermRef.current;
-    if (term) {
-      term.write(data);
-    }
-  }, []);
-
-  const fit = useCallback(() => {
-    fitAddonRef.current?.fit();
+    xtermRef.current?.write(data);
   }, []);
 
   const focus = useCallback(() => {
     xtermRef.current?.focus();
   }, []);
 
-  const scrollLines = useCallback((lines: number) => {
-    if (!lines) return;
-    xtermRef.current?.scrollLines(lines);
-  }, []);
-
   const clear = useCallback(() => {
     const terminal = xtermRef.current;
     if (!terminal) return;
-    // Clear screen and scrollback without full reset
-    // This preserves cursor visibility state (important for TUI apps that hide cursor)
-    // ESC[2J = clear entire screen, ESC[3J = clear scrollback, ESC[H = cursor to home
     terminal.write('\x1b[2J\x1b[3J\x1b[H');
   }, []);
 
@@ -259,20 +265,12 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     return { cols: terminal.cols, rows: terminal.rows };
   }, []);
 
-  // Serialize terminal state (content + cursor position)
-  const serialize = useCallback((): string | null => {
-    const addon = serializeAddonRef.current;
-    if (!addon) return null;
-    return addon.serialize();
-  }, []);
-
-  // Restore terminal state from serialized data
-  const restore = useCallback((data: string) => {
+  // Update terminal theme when resolvedTheme changes
+  useEffect(() => {
     const terminal = xtermRef.current;
     if (!terminal) return;
-    terminal.reset();
-    terminal.write(data);
-  }, []);
+    terminal.options.theme = getTerminalTheme(options.resolvedTheme ?? 'dark');
+  }, [options.resolvedTheme]);
 
-  return { terminalRef, write, fit, focus, scrollLines, keyboardInsetPx, clear, getDimensions, serialize, restore, isReady };
+  return { terminalRef, write, fit, focus, clear, getDimensions, isReady };
 }

@@ -1,120 +1,116 @@
-import { useCallback, useEffect, useImperativeHandle, useRef, forwardRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { Process } from '@agenthq/shared';
 import { useTerminal } from '@/hooks/useTerminal';
+import { useTheme } from '@/hooks/useTheme';
 
 interface TerminalPaneProps {
   process: Process | null;
   onInput: (processId: string, data: string) => void;
   onResize: (processId: string, cols: number, rows: number) => void;
   onPtyData: (processId: string, handler: (data: string) => void) => () => void;
-  isFocused?: boolean;
   onFocus?: () => void;
 }
 
-export interface TerminalPaneHandle {
-  getDimensions: () => { cols: number; rows: number } | null;
-  fit: () => void;
-}
+export function TerminalPane({ process, onInput, onResize, onPtyData, onFocus }: TerminalPaneProps) {
+  const { resolvedTheme } = useTheme();
+  const processId = process?.id ?? null;
 
-export const TerminalPane = forwardRef<TerminalPaneHandle, TerminalPaneProps>(
-  function TerminalPane({ process, onInput, onResize, onPtyData, onFocus }, ref) {
-    const processId = process?.id ?? null;
-
-    const handleData = useCallback(
-      (data: string) => {
-        if (processId) {
-          onInput(processId, data);
-        }
-      },
-      [processId, onInput]
-    );
-
-    const handleResize = useCallback(
-      (cols: number, rows: number) => {
-        if (processId) {
-          onResize(processId, cols, rows);
-        }
-      },
-      [processId, onResize]
-    );
-
-    const { terminalRef, write, fit, focus, clear, getDimensions, isReady } = useTerminal({
-      onData: handleData,
-      onResize: handleResize,
-    });
-
-    const focusPane = useCallback(() => {
-      focus();
-      onFocus?.();
-    }, [focus, onFocus]);
-
-    const writeRef = useRef(write);
-    writeRef.current = write;
-
-    const subscribedProcessIdRef = useRef<string | null>(null);
-    const cleanupRef = useRef<(() => void) | null>(null);
-
-    useImperativeHandle(ref, () => ({ getDimensions, fit }), [getDimensions, fit]);
-
-    useEffect(() => {
-      if (!isReady) {
-        if (cleanupRef.current) {
-          cleanupRef.current();
-          cleanupRef.current = null;
-        }
-        subscribedProcessIdRef.current = null;
-        return;
+  const handleData = useCallback(
+    (data: string) => {
+      if (processId) {
+        onInput(processId, data);
       }
+    },
+    [processId, onInput]
+  );
 
-      if (subscribedProcessIdRef.current === processId) {
-        return;
+  const handleResize = useCallback(
+    (cols: number, rows: number) => {
+      if (processId) {
+        onResize(processId, cols, rows);
       }
+    },
+    [processId, onResize]
+  );
 
+  const { terminalRef, write, fit, focus, clear, getDimensions, isReady } = useTerminal({
+    onData: handleData,
+    onResize: handleResize,
+    resolvedTheme,
+  });
+
+  const focusPane = useCallback(() => {
+    focus();
+    onFocus?.();
+  }, [focus, onFocus]);
+
+  const writeRef = useRef(write);
+  writeRef.current = write;
+
+  const subscribedProcessIdRef = useRef<string | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!isReady) {
       if (cleanupRef.current) {
         cleanupRef.current();
         cleanupRef.current = null;
       }
+      subscribedProcessIdRef.current = null;
+      return;
+    }
 
-      subscribedProcessIdRef.current = processId;
-      clear();
-      fit();
+    if (subscribedProcessIdRef.current === processId) {
+      return;
+    }
 
-      if (!processId) {
-        return;
+    if (cleanupRef.current) {
+      cleanupRef.current();
+      cleanupRef.current = null;
+    }
+
+    subscribedProcessIdRef.current = processId;
+    clear();
+    fit();
+
+    if (!processId) {
+      return;
+    }
+
+    const resizeRafId = window.requestAnimationFrame(() => {
+      const dimensions = getDimensions();
+      if (dimensions) {
+        onResize(processId, dimensions.cols, dimensions.rows);
       }
+    });
 
-      cleanupRef.current = onPtyData(processId, (data) => {
-        writeRef.current(data);
-      });
+    cleanupRef.current = onPtyData(processId, (data) => {
+      writeRef.current(data);
+    });
 
-      const resizeTimeoutId = window.setTimeout(() => {
-        fit();
-      }, 50);
+    return () => {
+      window.cancelAnimationFrame(resizeRafId);
+    };
+  }, [isReady, processId, onPtyData, clear, fit, getDimensions, onResize]);
 
-      return () => {
-        window.clearTimeout(resizeTimeoutId);
-      };
-    }, [isReady, processId, onPtyData, clear, fit]);
+  useEffect(() => {
+    return () => {
+      if (cleanupRef.current) {
+        cleanupRef.current();
+        cleanupRef.current = null;
+      }
+    };
+  }, []);
 
-    useEffect(() => {
-      return () => {
-        if (cleanupRef.current) {
-          cleanupRef.current();
-          cleanupRef.current = null;
-        }
-      };
-    }, []);
+  return (
+    <div className="relative h-full min-h-0 w-full overflow-hidden bg-terminal-bg" onClick={focusPane}>
+      <div ref={terminalRef} className="h-full min-h-0 w-full overflow-hidden" />
 
-    return (
-      <div className="relative h-full min-h-0 w-full overflow-hidden bg-[#0a0a0a]" onClick={focusPane}>
-        <div ref={terminalRef} className="h-full min-h-0 w-full overflow-hidden" />
-
-        {!process && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#0a0a0a]/90">
-            <span className="text-muted-foreground">Select a process tab</span>
-          </div>
-        )}
-      </div>
-    );
-  }
-);
+      {!process && (
+        <div className="absolute inset-0 flex items-center justify-center bg-terminal-bg/90">
+          <span className="text-muted-foreground">Select a process tab</span>
+        </div>
+      )}
+    </div>
+  );
+}

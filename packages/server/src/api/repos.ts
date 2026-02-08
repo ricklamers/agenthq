@@ -12,16 +12,33 @@ import { daemonHub } from '../ws/daemon-hub.js';
 
 const execFileAsync = promisify(execFile);
 
-interface ParsedGithubRepo {
+interface ParsedGitRepo {
   owner: string;
   repo: string;
   cloneUrl: string;
+  protocol: 'https' | 'ssh';
 }
 
-function parsePublicGithubUrl(rawUrl: string): ParsedGithubRepo | null {
+const SSH_URL_RE = /^git@([^:]+):([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?$/;
+
+function parseGitUrl(rawUrl: string): ParsedGitRepo | null {
   const trimmed = rawUrl.trim();
   if (!trimmed) return null;
 
+  // Try SSH format: git@github.com:owner/repo.git
+  const sshMatch = SSH_URL_RE.exec(trimmed);
+  if (sshMatch) {
+    const [, , owner, repo] = sshMatch;
+    if (!owner || !repo) return null;
+    return {
+      owner,
+      repo,
+      cloneUrl: `git@github.com:${owner}/${repo}.git`,
+      protocol: 'ssh',
+    };
+  }
+
+  // Try HTTPS format
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
@@ -45,6 +62,7 @@ function parsePublicGithubUrl(rawUrl: string): ParsedGithubRepo | null {
     owner,
     repo,
     cloneUrl: `https://github.com/${owner}/${repo}.git`,
+    protocol: 'https',
   };
 }
 
@@ -94,10 +112,10 @@ export async function registerRepoRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Adding repos is currently supported for local environment only' });
     }
 
-    const parsed = parsePublicGithubUrl(url);
+    const parsed = parseGitUrl(url);
     if (!parsed) {
       return reply.status(400).send({
-        error: 'Only public GitHub HTTPS URLs are supported for now (e.g. https://github.com/owner/repo)',
+        error: 'Please provide a valid GitHub URL (e.g. https://github.com/owner/repo or git@github.com:owner/repo.git)',
       });
     }
 
@@ -114,9 +132,14 @@ export async function registerRepoRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
+      const cloneEnv: Record<string, string> = { ...process.env as Record<string, string> };
+      if (parsed.protocol === 'ssh') {
+        cloneEnv.GIT_SSH_COMMAND = 'ssh -o StrictHostKeyChecking=accept-new';
+      }
       await execFileAsync('git', ['clone', '--', parsed.cloneUrl, targetPath], {
         cwd: workspace,
         timeout: 120_000,
+        env: cloneEnv,
       });
     } catch (err: unknown) {
       const stderr = err && typeof err === 'object' && 'stderr' in err ? String((err as { stderr?: unknown }).stderr ?? '') : '';

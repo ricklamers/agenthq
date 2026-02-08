@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { AgentType, Process, Worktree } from '@agenthq/shared';
 import { TerminalPane } from './TerminalPane';
 import { Button } from './ui/button';
-import { Circle, Menu, Plus, X } from 'lucide-react';
+import { Archive, Bot, Circle, Menu, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface SplitTerminalContainerProps {
@@ -23,6 +23,13 @@ interface SplitTerminalContainerProps {
 }
 
 const MOBILE_BREAKPOINT_QUERY = '(max-width: 767px)';
+const MERGE_AGENT_OPTIONS: { value: AgentType; label: string }[] = [
+  { value: 'claude-code', label: 'Claude Code' },
+  { value: 'codex-cli', label: 'Codex CLI' },
+  { value: 'cursor-agent', label: 'Cursor Agent' },
+  { value: 'droid-cli', label: 'Droid CLI' },
+  { value: 'kimi-cli', label: 'Kimi CLI' },
+];
 
 export function SplitTerminalContainer({
   worktree,
@@ -34,9 +41,13 @@ export function SplitTerminalContainer({
   onPtyData,
   onNewProcess,
   onKillProcess,
+  onArchiveWorktree,
+  onMergeWithAgent,
   onOpenSidebar,
 }: SplitTerminalContainerProps) {
   const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null);
+  const [showAgentMergeDialog, setShowAgentMergeDialog] = useState(false);
+  const [pendingSelectProcessId, setPendingSelectProcessId] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(() => {
     if (typeof window === 'undefined') return false;
     return window.matchMedia(MOBILE_BREAKPOINT_QUERY).matches;
@@ -74,6 +85,15 @@ export function SplitTerminalContainer({
       onAutoSelectComplete?.();
     }
   }, [autoSelectProcessId, processes, onAutoSelectComplete]);
+
+  // Auto-select process IDs created by worktree actions (e.g. agent merge).
+  useEffect(() => {
+    if (!pendingSelectProcessId) return;
+    if (processes.some((p) => p.id === pendingSelectProcessId)) {
+      setSelectedProcessId(pendingSelectProcessId);
+      setPendingSelectProcessId(null);
+    }
+  }, [pendingSelectProcessId, processes]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -194,6 +214,64 @@ export function SplitTerminalContainer({
           />
         )}
       </div>
+
+      {worktree && !worktree.isMain && (
+        <div className="flex items-center justify-between border-t border-border bg-card px-4 py-2">
+          <div className="text-sm text-muted-foreground">
+            <span className="font-medium">{worktree.branch}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1"
+              onClick={() => setShowAgentMergeDialog(true)}
+              title="Use an AI agent to resolve merge conflicts"
+            >
+              <Bot className="h-4 w-4" />
+              Agent Merge
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1 text-destructive hover:text-destructive"
+              onClick={onArchiveWorktree}
+            >
+              <Archive className="h-4 w-4" />
+              Archive Worktree
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {showAgentMergeDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6">
+            <h2 className="mb-4 text-lg font-semibold">Select Agent for Merge</h2>
+            <div className="grid grid-cols-2 gap-2">
+              {MERGE_AGENT_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={async () => {
+                    setShowAgentMergeDialog(false);
+                    const processId = await onMergeWithAgent(option.value);
+                    if (processId) setPendingSelectProcessId(processId);
+                  }}
+                  className="flex flex-col items-start rounded-lg border border-input bg-background px-3 py-2.5 text-left transition-colors hover:border-primary hover:bg-primary/10"
+                >
+                  <span className="text-sm font-medium">{option.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-end">
+              <Button variant="outline" onClick={() => setShowAgentMergeDialog(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

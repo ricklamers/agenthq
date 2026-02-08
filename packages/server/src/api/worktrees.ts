@@ -10,6 +10,26 @@ interface CreateWorktreeBody {
   envId: string;
 }
 
+interface TerminalSizeBody {
+  cols?: number;
+  rows?: number;
+}
+
+interface MergeWithAgentBody extends TerminalSizeBody {
+  agent?: AgentType;
+}
+
+function isValidTerminalSize(cols: unknown, rows: unknown): boolean {
+  return (
+    typeof cols === 'number' &&
+    typeof rows === 'number' &&
+    Number.isFinite(cols) &&
+    Number.isFinite(rows) &&
+    cols > 0 &&
+    rows > 0
+  );
+}
+
 export async function registerWorktreeRoutes(app: FastifyInstance): Promise<void> {
   // List all worktrees
   app.get('/api/worktrees', async () => {
@@ -113,10 +133,19 @@ export async function registerWorktreeRoutes(app: FastifyInstance): Promise<void
   });
 
   // Run diff command on worktree
-  app.post<{ Params: { id: string } }>('/api/worktrees/:id/diff', async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: TerminalSizeBody }>(
+    '/api/worktrees/:id/diff',
+    async (request, reply) => {
     const worktree = worktreeStore.get(request.params.id);
     if (!worktree) {
       return reply.status(404).send({ error: 'Worktree not found' });
+    }
+
+    const { cols, rows } = request.body ?? {};
+    if (!isValidTerminalSize(cols, rows)) {
+      return reply.status(400).send({
+        error: 'Invalid terminal size: cols and rows must be positive numbers measured by the frontend',
+      });
     }
 
     if (!worktree.envId) {
@@ -138,8 +167,8 @@ export async function registerWorktreeRoutes(app: FastifyInstance): Promise<void
       agent: 'shell',
       args: [],
       task: 'git diff main --stat && echo "---" && git diff main',
-      cols: 120,
-      rows: 30,
+      cols,
+      rows,
       yoloMode: false,
     });
 
@@ -153,10 +182,19 @@ export async function registerWorktreeRoutes(app: FastifyInstance): Promise<void
   });
 
   // Merge worktree branch into main
-  app.post<{ Params: { id: string } }>('/api/worktrees/:id/merge', async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: TerminalSizeBody }>(
+    '/api/worktrees/:id/merge',
+    async (request, reply) => {
     const worktree = worktreeStore.get(request.params.id);
     if (!worktree) {
       return reply.status(404).send({ error: 'Worktree not found' });
+    }
+
+    const { cols, rows } = request.body ?? {};
+    if (!isValidTerminalSize(cols, rows)) {
+      return reply.status(400).send({
+        error: 'Invalid terminal size: cols and rows must be positive numbers measured by the frontend',
+      });
     }
 
     if (!worktree.envId) {
@@ -213,8 +251,8 @@ fi
       agent: 'shell',
       args: [],
       task: mergeScript,
-      cols: 120,
-      rows: 30,
+      cols,
+      rows,
       yoloMode: false,
     });
 
@@ -228,10 +266,19 @@ fi
   });
 
   // Merge with agent assistance (for conflicts)
-  app.post<{ Params: { id: string }; Body: { agent?: AgentType } }>('/api/worktrees/:id/merge-with-agent', async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: MergeWithAgentBody }>(
+    '/api/worktrees/:id/merge-with-agent',
+    async (request, reply) => {
     const worktree = worktreeStore.get(request.params.id);
     if (!worktree) {
       return reply.status(404).send({ error: 'Worktree not found' });
+    }
+
+    const { cols, rows } = request.body ?? {};
+    if (!isValidTerminalSize(cols, rows)) {
+      return reply.status(400).send({
+        error: 'Invalid terminal size: cols and rows must be positive numbers measured by the frontend',
+      });
     }
 
     if (!worktree.envId) {
@@ -273,8 +320,8 @@ You are currently in the main worktree at: ${mainWorktree.path}`;
       agent,
       args: [],
       task: mergePrompt,
-      cols: 120,
-      rows: 30,
+      cols,
+      rows,
       yoloMode: true, // Allow agent to make changes
     });
 

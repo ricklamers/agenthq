@@ -21,6 +21,7 @@ const SELECTED_ENV_STORAGE_KEY = 'agenthq:selectedEnvId';
 export function App() {
   const { connected, environments, worktrees, processes, send, onPtyData } = useWebSocket();
   const [selectedWorktreeId, setSelectedWorktreeId] = useState<string | null>(null);
+  const [terminalSize, setTerminalSize] = useState<{ cols: number; rows: number } | null>(null);
   const [selectedEnvId, setSelectedEnvId] = useState<string>(() => {
     return localStorage.getItem(SELECTED_ENV_STORAGE_KEY) ?? 'local';
   });
@@ -32,7 +33,7 @@ export function App() {
   
   const [showSettings, setShowSettings] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [spawnDialog, setSpawnDialog] = useState<{ worktreeId: string; envId: string; cols?: number; rows?: number } | null>(null);
+  const [spawnDialog, setSpawnDialog] = useState<{ worktreeId: string; envId: string } | null>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [autoSelectProcessId, setAutoSelectProcessId] = useState<string | null>(null);
   const [autoSelectedEnvIds, setAutoSelectedEnvIds] = useState<Set<string>>(new Set());
@@ -44,6 +45,14 @@ export function App() {
     if (!selectedWorktreeId) return [];
     return Array.from(processes.values()).filter((p) => p.worktreeId === selectedWorktreeId);
   }, [processes, selectedWorktreeId]);
+
+  const getMeasuredTerminalSize = useCallback(() => {
+    if (!terminalSize || terminalSize.cols <= 0 || terminalSize.rows <= 0) {
+      alert('Terminal size is still initializing. Please wait a moment and try again.');
+      return null;
+    }
+    return terminalSize;
+  }, [terminalSize]);
 
   // Select worktree and open new tab dialog if no tabs exist
   const handleSelectWorktree = useCallback((worktreeId: string) => {
@@ -158,9 +167,8 @@ export function App() {
   const handleSpawn = async (agent: AgentType, task?: string, yoloMode?: boolean) => {
     if (!spawnDialog) return;
 
-    // Use provided dimensions or defaults
-    const cols = spawnDialog.cols ?? 80;
-    const rows = spawnDialog.rows ?? 24;
+    const measuredSize = getMeasuredTerminalSize();
+    if (!measuredSize) return;
 
     try {
       const res = await fetch(`/api/worktrees/${spawnDialog.worktreeId}/processes`, {
@@ -170,8 +178,8 @@ export function App() {
           agent,
           task,
           envId: spawnDialog.envId,
-          cols,
-          rows,
+          cols: measuredSize.cols,
+          rows: measuredSize.rows,
           yoloMode: yoloMode || false,
         }),
       });
@@ -227,8 +235,18 @@ export function App() {
 
   const handleViewDiff = async (): Promise<string | null> => {
     if (!selectedWorktreeId) return null;
+    const measuredSize = getMeasuredTerminalSize();
+    if (!measuredSize) return null;
+
     try {
-      const res = await fetch(`/api/worktrees/${selectedWorktreeId}/diff`, { method: 'POST' });
+      const res = await fetch(`/api/worktrees/${selectedWorktreeId}/diff`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cols: measuredSize.cols,
+          rows: measuredSize.rows,
+        }),
+      });
       if (!res.ok) {
         const error = await res.json();
         console.error('Failed to view diff:', error);
@@ -246,8 +264,18 @@ export function App() {
 
   const handleMerge = async (): Promise<string | null> => {
     if (!selectedWorktreeId) return null;
+    const measuredSize = getMeasuredTerminalSize();
+    if (!measuredSize) return null;
+
     try {
-      const res = await fetch(`/api/worktrees/${selectedWorktreeId}/merge`, { method: 'POST' });
+      const res = await fetch(`/api/worktrees/${selectedWorktreeId}/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cols: measuredSize.cols,
+          rows: measuredSize.rows,
+        }),
+      });
       if (!res.ok) {
         const error = await res.json();
         console.error('Failed to merge:', error);
@@ -265,11 +293,18 @@ export function App() {
 
   const handleMergeWithAgent = async (agent: AgentType): Promise<string | null> => {
     if (!selectedWorktreeId) return null;
+    const measuredSize = getMeasuredTerminalSize();
+    if (!measuredSize) return null;
+
     try {
       const res = await fetch(`/api/worktrees/${selectedWorktreeId}/merge-with-agent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agent }),
+        body: JSON.stringify({
+          agent,
+          cols: measuredSize.cols,
+          rows: measuredSize.rows,
+        }),
       });
       if (!res.ok) {
         const error = await res.json();
@@ -373,6 +408,16 @@ export function App() {
     setIsMobileSidebarOpen(false);
   }, []);
 
+  const handleTerminalSizeChange = useCallback((cols: number, rows: number) => {
+    if (cols <= 0 || rows <= 0) return;
+    setTerminalSize((prev) => {
+      if (prev && prev.cols === cols && prev.rows === rows) {
+        return prev;
+      }
+      return { cols, rows };
+    });
+  }, []);
+
   const handleSelectWorktreeFromSidebar = useCallback((worktreeId: string) => {
     handleSelectWorktree(worktreeId);
     setIsMobileSidebarOpen(false);
@@ -421,6 +466,7 @@ export function App() {
       onViewDiff={handleViewDiff}
       onMerge={handleMerge}
       onMergeWithAgent={handleMergeWithAgent}
+      onTerminalSizeChange={handleTerminalSizeChange}
       onOpenSidebar={() => setIsMobileSidebarOpen(true)}
     />
   );

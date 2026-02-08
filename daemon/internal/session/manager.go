@@ -114,12 +114,8 @@ func (m *Manager) Spawn(processID string, agent protocol.AgentType, worktreePath
 		args = []string{"-i", "-l", "-c", fullCmd + "; exec bash -il"}
 	}
 
-	// Use defaults if not provided
-	if cols <= 0 {
-		cols = 120
-	}
-	if rows <= 0 {
-		rows = 30
+	if cols <= 0 || rows <= 0 {
+		return fmt.Errorf("invalid initial terminal size cols=%d rows=%d", cols, rows)
 	}
 
 	// Spawn the process with initial terminal size

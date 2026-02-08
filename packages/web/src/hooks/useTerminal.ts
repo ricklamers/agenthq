@@ -64,6 +64,7 @@ function getTerminalTheme(resolvedTheme: ResolvedTheme) {
 interface UseTerminalOptions {
   onData?: (data: string) => void;
   onResize?: (cols: number, rows: number) => void;
+  onSizeChange?: (cols: number, rows: number) => void;
   resolvedTheme?: ResolvedTheme;
 }
 
@@ -85,10 +86,21 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
   const touchCleanupRef = useRef<(() => void) | null>(null);
   const onDataRef = useRef(options.onData);
   const onResizeRef = useRef(options.onResize);
+  const onSizeChangeRef = useRef(options.onSizeChange);
+  const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null);
   const [isReady, setIsReady] = useState(false);
 
   onDataRef.current = options.onData;
   onResizeRef.current = options.onResize;
+  onSizeChangeRef.current = options.onSizeChange;
+
+  const reportSize = useCallback((cols: number, rows: number) => {
+    if (cols <= 0 || rows <= 0) return;
+    const last = lastSizeRef.current;
+    if (last && last.cols === cols && last.rows === rows) return;
+    lastSizeRef.current = { cols, rows };
+    onSizeChangeRef.current?.(cols, rows);
+  }, []);
 
   const cleanupTerminal = useCallback(() => {
     if (fitRafRef.current !== null) {
@@ -104,12 +116,17 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     xtermRef.current?.dispose();
     xtermRef.current = null;
     fitAddonRef.current = null;
+    lastSizeRef.current = null;
     setIsReady(false);
   }, []);
 
   const fit = useCallback(() => {
-    fitAddonRef.current?.fit();
-  }, []);
+    const fitAddon = fitAddonRef.current;
+    const terminal = xtermRef.current;
+    if (!fitAddon || !terminal) return;
+    fitAddon.fit();
+    reportSize(terminal.cols, terminal.rows);
+  }, [reportSize]);
 
   const terminalRef = useCallback((node: HTMLDivElement | null) => {
     if (containerRef.current && containerRef.current !== node) {
@@ -239,16 +256,19 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
 
     terminal.onResize(({ cols, rows }) => {
       onResizeRef.current?.(cols, rows);
+      reportSize(cols, rows);
     });
 
     fitAddon.fit();
+    reportSize(terminal.cols, terminal.rows);
     fitRafRef.current = window.requestAnimationFrame(() => {
       fitRafRef.current = null;
       fitAddon.fit();
+      reportSize(terminal.cols, terminal.rows);
     });
 
     setIsReady(true);
-  }, [cleanupTerminal]);
+  }, [cleanupTerminal, reportSize]);
 
   const write = useCallback((data: string) => {
     xtermRef.current?.write(data);

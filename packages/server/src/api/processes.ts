@@ -15,6 +15,17 @@ interface CreateProcessBody {
   yoloMode?: boolean;
 }
 
+function isValidTerminalSize(cols: unknown, rows: unknown): boolean {
+  return (
+    typeof cols === 'number' &&
+    typeof rows === 'number' &&
+    Number.isFinite(cols) &&
+    Number.isFinite(rows) &&
+    cols > 0 &&
+    rows > 0
+  );
+}
+
 export async function registerProcessRoutes(app: FastifyInstance): Promise<void> {
   // List all processes
   app.get('/api/processes', async () => {
@@ -36,6 +47,12 @@ export async function registerProcessRoutes(app: FastifyInstance): Promise<void>
     async (request, reply) => {
       const { id: worktreeId } = request.params;
       const { agent, task, envId, cols, rows, yoloMode } = request.body;
+
+      if (!isValidTerminalSize(cols, rows)) {
+        return reply.status(400).send({
+          error: 'Invalid terminal size: cols and rows must be positive numbers measured by the frontend',
+        });
+      }
 
       // Validate environment
       const env = envStore.get(envId);
@@ -70,8 +87,8 @@ export async function registerProcessRoutes(app: FastifyInstance): Promise<void>
         agent,
         args: [],
         task,
-        cols: cols || 120,
-        rows: rows || 30,
+        cols,
+        rows,
         yoloMode: yoloMode || false,
       });
 

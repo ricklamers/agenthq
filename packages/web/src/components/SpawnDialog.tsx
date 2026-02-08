@@ -29,7 +29,6 @@ export function SpawnDialog({ open, worktreeId, onClose, onSpawn }: SpawnDialogP
     const option = AGENT_OPTIONS.find((o) => o.value === agent);
     const useYolo = option?.supportsYolo ? yoloMode : false;
     onSpawn(agent, undefined, useYolo);
-    onClose();
     setYoloMode(false); // Reset for next time
   };
 

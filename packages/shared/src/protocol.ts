@@ -36,8 +36,8 @@ export type ServerToDaemonMessage =
       agent: AgentType;
       args: string[];
       task?: string;
-      cols?: number;
-      rows?: number;
+      cols: number;
+      rows: number;
       yoloMode?: boolean;
     }
   | { type: 'pty-input'; processId: string; data: string }

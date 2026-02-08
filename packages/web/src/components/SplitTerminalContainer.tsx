@@ -19,6 +19,7 @@ interface SplitTerminalContainerProps {
   onViewDiff: () => Promise<string | null>;
   onMerge: () => Promise<string | null>;
   onMergeWithAgent: (agent: AgentType) => Promise<string | null>;
+  onTerminalSizeChange?: (cols: number, rows: number) => void;
   onOpenSidebar?: () => void;
 }
 
@@ -43,6 +44,7 @@ export function SplitTerminalContainer({
   onKillProcess,
   onArchiveWorktree,
   onMergeWithAgent,
+  onTerminalSizeChange,
   onOpenSidebar,
 }: SplitTerminalContainerProps) {
   const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null);
@@ -200,10 +202,6 @@ export function SplitTerminalContainer({
           <div className="flex h-full items-center justify-center bg-terminal-bg">
             <span className="text-muted-foreground">Select a worktree to view processes</span>
           </div>
-        ) : processes.length === 0 ? (
-          <div className="flex h-full items-center justify-center bg-terminal-bg">
-            <span className="text-muted-foreground">Click "+ New Tab" to spawn a process</span>
-          </div>
         ) : (
           <TerminalPane
             process={selectedProcess}
@@ -211,6 +209,10 @@ export function SplitTerminalContainer({
             onResize={onResize}
             onPtyData={onPtyData}
             onFocus={handleFocusTerminal}
+            onSizeChange={onTerminalSizeChange}
+            emptyMessage={
+              processes.length === 0 ? 'Click "+ New Tab" to spawn a process' : 'Select a process tab'
+            }
           />
         )}
       </div>

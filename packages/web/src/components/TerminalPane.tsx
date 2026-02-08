@@ -9,9 +9,19 @@ interface TerminalPaneProps {
   onResize: (processId: string, cols: number, rows: number) => void;
   onPtyData: (processId: string, handler: (data: string) => void) => () => void;
   onFocus?: () => void;
+  onSizeChange?: (cols: number, rows: number) => void;
+  emptyMessage?: string;
 }
 
-export function TerminalPane({ process, onInput, onResize, onPtyData, onFocus }: TerminalPaneProps) {
+export function TerminalPane({
+  process,
+  onInput,
+  onResize,
+  onPtyData,
+  onFocus,
+  onSizeChange,
+  emptyMessage,
+}: TerminalPaneProps) {
   const { resolvedTheme } = useTheme();
   const processId = process?.id ?? null;
   const paneRef = useRef<HTMLDivElement | null>(null);
@@ -37,6 +47,7 @@ export function TerminalPane({ process, onInput, onResize, onPtyData, onFocus }:
   const { terminalRef, write, fit, focus, clear, isReady } = useTerminal({
     onData: handleData,
     onResize: handleResize,
+    onSizeChange,
     resolvedTheme,
   });
 
@@ -165,7 +176,7 @@ export function TerminalPane({ process, onInput, onResize, onPtyData, onFocus }:
 
       {!process && (
         <div className="absolute inset-0 flex items-center justify-center bg-terminal-bg/90">
-          <span className="text-muted-foreground">Select a process tab</span>
+          <span className="text-muted-foreground">{emptyMessage ?? 'Select a process tab'}</span>
         </div>
       )}
     </div>

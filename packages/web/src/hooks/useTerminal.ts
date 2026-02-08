@@ -153,15 +153,47 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     node.addEventListener('wheel', handleWheel, { passive: false });
     wheelHandlerRef.current = handleWheel;
 
-    // Touch drag to scroll
+    // Touch drag to scroll with iOS-style momentum
     let touchStartY: number | null = null;
+    let lastTouchY = 0;
+    let lastTouchTime = 0;
+    let velocity = 0;
     let accumDelta = 0;
+    let momentumRaf: number | null = null;
     const lineHeight = Math.ceil((terminal.options.fontSize ?? 14) * 1.2);
+    const friction = 0.97;
+    const minVelocity = 0.5;
+
+    const stopMomentum = () => {
+      if (momentumRaf !== null) {
+        cancelAnimationFrame(momentumRaf);
+        momentumRaf = null;
+      }
+    };
+
+    const tickMomentum = () => {
+      velocity *= friction;
+      if (Math.abs(velocity) < minVelocity) {
+        momentumRaf = null;
+        return;
+      }
+      accumDelta += velocity;
+      const lines = Math.trunc(accumDelta / lineHeight);
+      if (lines !== 0) {
+        accumDelta -= lines * lineHeight;
+        terminal.scrollLines(lines);
+      }
+      momentumRaf = requestAnimationFrame(tickMomentum);
+    };
 
     const handleTouchStart = (e: TouchEvent) => {
       const touch = e.touches[0];
       if (e.touches.length === 1 && touch) {
+        stopMomentum();
         touchStartY = touch.clientY;
+        lastTouchY = touch.clientY;
+        lastTouchTime = e.timeStamp;
+        velocity = 0;
         accumDelta = 0;
       }
     };
@@ -170,8 +202,13 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
       if (touchStartY === null || e.touches.length !== 1 || !touch) return;
       e.preventDefault();
       const currentY = touch.clientY;
-      const deltaY = touchStartY - currentY;
-      touchStartY = currentY;
+      const dt = e.timeStamp - lastTouchTime;
+      const deltaY = lastTouchY - currentY;
+      if (dt > 0) {
+        velocity = deltaY / Math.max(dt, 8) * 16; // normalize to ~16ms frame
+      }
+      lastTouchY = currentY;
+      lastTouchTime = e.timeStamp;
       accumDelta += deltaY;
       const lines = Math.trunc(accumDelta / lineHeight);
       if (lines !== 0) {
@@ -181,13 +218,16 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     };
     const handleTouchEnd = () => {
       touchStartY = null;
-      accumDelta = 0;
+      if (Math.abs(velocity) > minVelocity) {
+        momentumRaf = requestAnimationFrame(tickMomentum);
+      }
     };
 
     node.addEventListener('touchstart', handleTouchStart, { passive: true });
     node.addEventListener('touchmove', handleTouchMove, { passive: false });
     node.addEventListener('touchend', handleTouchEnd, { passive: true });
     touchCleanupRef.current = () => {
+      stopMomentum();
       node.removeEventListener('touchstart', handleTouchStart);
       node.removeEventListener('touchmove', handleTouchMove);
       node.removeEventListener('touchend', handleTouchEnd);

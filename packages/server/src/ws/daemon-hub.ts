@@ -77,6 +77,19 @@ class DaemonHub {
         break;
       }
 
+      case 'pty-size': {
+        const process = processStore.get(message.processId);
+        if (process) {
+          browserHub.sendToProcess(message.processId, {
+            type: 'pty-size',
+            processId: message.processId,
+            cols: message.cols,
+            rows: message.rows,
+          });
+        }
+        break;
+      }
+
       case 'process-started': {
         const updated = processStore.updateStatus(message.processId, 'running');
         if (updated) {

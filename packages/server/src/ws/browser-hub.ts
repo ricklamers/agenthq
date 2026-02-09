@@ -70,6 +70,12 @@ class BrowserHub {
         const process = processStore.get(message.processId);
         if (process) {
           this.send(conn, { type: 'process-update', process });
+
+          // Request the daemon's current PTY size so browser can reconcile.
+          daemonHub.sendToEnv(process.envId, {
+            type: 'query-pty-size',
+            processId: message.processId,
+          });
         }
         break;
       }

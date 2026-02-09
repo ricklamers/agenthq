@@ -167,6 +167,7 @@ func handleServerMessage(wsClient *client.Client, mgr *session.Manager, msg prot
 				Type:      protocol.MsgTypeProcessStarted,
 				ProcessID: msg.ProcessID,
 			})
+			sendPtySize(wsClient, mgr, msg.ProcessID)
 		}
 
 	case protocol.MsgTypePtyInput:
@@ -183,7 +184,12 @@ func handleServerMessage(wsClient *client.Client, mgr *session.Manager, msg prot
 	case protocol.MsgTypeResize:
 		if err := mgr.Resize(msg.ProcessID, msg.Cols, msg.Rows); err != nil {
 			log.Printf("Failed to resize: %v", err)
+		} else {
+			sendPtySize(wsClient, mgr, msg.ProcessID)
 		}
+
+	case protocol.MsgTypeQueryPtySize:
+		sendPtySize(wsClient, mgr, msg.ProcessID)
 
 	case protocol.MsgTypeKill:
 		log.Printf("Kill request: processId=%s", msg.ProcessID)
@@ -206,6 +212,21 @@ func handleServerMessage(wsClient *client.Client, mgr *session.Manager, msg prot
 	default:
 		log.Printf("Unknown message type: %s", msg.Type)
 	}
+}
+
+func sendPtySize(wsClient *client.Client, mgr *session.Manager, processID string) {
+	cols, rows, err := mgr.Size(processID)
+	if err != nil {
+		log.Printf("Failed to get PTY size for process %s: %v", processID, err)
+		return
+	}
+
+	wsClient.Send(protocol.DaemonMessage{
+		Type:      protocol.MsgTypePtySize,
+		ProcessID: processID,
+		Cols:      cols,
+		Rows:      rows,
+	})
 }
 
 // createWorktree creates a new git worktree

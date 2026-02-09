@@ -13,6 +13,7 @@ interface SplitTerminalContainerProps {
   onInput: (processId: string, data: string) => void;
   onResize: (processId: string, cols: number, rows: number) => void;
   onPtyData: (processId: string, handler: (data: string) => void) => () => void;
+  onPtySize: (processId: string, handler: (cols: number, rows: number) => void) => () => void;
   onNewProcess: () => void;
   onKillProcess: (processId: string) => void;
   onArchiveWorktree: () => void;
@@ -40,6 +41,7 @@ export function SplitTerminalContainer({
   onInput,
   onResize,
   onPtyData,
+  onPtySize,
   onNewProcess,
   onKillProcess,
   onArchiveWorktree,
@@ -208,6 +210,7 @@ export function SplitTerminalContainer({
             onInput={onInput}
             onResize={onResize}
             onPtyData={onPtyData}
+            onPtySize={onPtySize}
             onFocus={handleFocusTerminal}
             onSizeChange={onTerminalSizeChange}
             emptyMessage={

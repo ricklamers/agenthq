@@ -110,6 +110,19 @@ func (p *Process) Resize(cols, rows uint16) error {
 	})
 }
 
+// Size returns the current PTY window size.
+func (p *Process) Size() (cols, rows int, err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	size, err := pty.GetsizeFull(p.pty)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return int(size.Cols), int(size.Rows), nil
+}
+
 // Wait waits for the process to exit and returns the exit code.
 func (p *Process) Wait() (int, error) {
 	err := p.cmd.Wait()

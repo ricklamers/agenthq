@@ -183,6 +183,19 @@ func (m *Manager) Resize(processID string, cols, rows int) error {
 	return session.Process.Resize(uint16(cols), uint16(rows))
 }
 
+// Size returns the process PTY's current terminal size.
+func (m *Manager) Size(processID string) (cols, rows int, err error) {
+	m.mu.RLock()
+	session, ok := m.sessions[processID]
+	m.mu.RUnlock()
+
+	if !ok {
+		return 0, 0, fmt.Errorf("process %s not found", processID)
+	}
+
+	return session.Process.Size()
+}
+
 // Kill terminates a process.
 func (m *Manager) Kill(processID string) error {
 	m.mu.RLock()

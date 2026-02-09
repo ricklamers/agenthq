@@ -10,6 +10,7 @@ export type DaemonToServerMessage =
   | { type: 'register'; envId: string; envName: string; capabilities: string[]; workspace?: string }
   | { type: 'heartbeat' }
   | { type: 'pty-data'; processId: string; data: string }
+  | { type: 'pty-size'; processId: string; cols: number; rows: number }
   | { type: 'buffer-clear'; processId: string }
   | { type: 'process-started'; processId: string }
   | { type: 'process-exit'; processId: string; exitCode: number }
@@ -42,6 +43,7 @@ export type ServerToDaemonMessage =
     }
   | { type: 'pty-input'; processId: string; data: string }
   | { type: 'resize'; processId: string; cols: number; rows: number }
+  | { type: 'query-pty-size'; processId: string }
   | { type: 'kill'; processId: string }
   | { type: 'remove-worktree'; worktreeId: string; worktreePath: string }
   | { type: 'list-repos' };
@@ -62,6 +64,7 @@ export type BrowserToServerMessage =
 
 export type ServerToBrowserMessage =
   | { type: 'pty-data'; processId: string; data: string }
+  | { type: 'pty-size'; processId: string; cols: number; rows: number }
   | { type: 'process-update'; process: Process }
   | { type: 'process-removed'; processId: string }
   | { type: 'worktree-update'; worktree: Worktree }

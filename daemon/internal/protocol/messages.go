@@ -32,6 +32,8 @@ type DaemonMessage struct {
 	ProcessID    string     `json:"processId,omitempty"`
 	WorktreeID   string     `json:"worktreeId,omitempty"`
 	Data         string     `json:"data,omitempty"`
+	Cols         int        `json:"cols,omitempty"`
+	Rows         int        `json:"rows,omitempty"`
 	ExitCode     int        `json:"exitCode,omitempty"`
 	Branch       string     `json:"branch,omitempty"`
 	Path         string     `json:"path,omitempty"`
@@ -61,6 +63,7 @@ const (
 	MsgTypeRegister       = "register"
 	MsgTypeHeartbeat      = "heartbeat"
 	MsgTypePtyData        = "pty-data"
+	MsgTypePtySize        = "pty-size"
 	MsgTypeProcessStarted = "process-started"
 	MsgTypeProcessExit    = "process-exit"
 	MsgTypeWorktreeReady  = "worktree-ready"
@@ -74,6 +77,7 @@ const (
 	MsgTypeSpawn          = "spawn"
 	MsgTypePtyInput       = "pty-input"
 	MsgTypeResize         = "resize"
+	MsgTypeQueryPtySize   = "query-pty-size"
 	MsgTypeKill           = "kill"
 	MsgTypeRemoveWorktree = "remove-worktree"
 	MsgTypeListRepos      = "list-repos"

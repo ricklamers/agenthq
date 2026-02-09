@@ -19,7 +19,7 @@ type ConfirmAction =
 const SELECTED_ENV_STORAGE_KEY = 'agenthq:selectedEnvId';
 
 export function App() {
-  const { connected, environments, worktrees, processes, send, onPtyData } = useWebSocket();
+  const { connected, environments, worktrees, processes, send, onPtyData, onPtySize } = useWebSocket();
   const [selectedWorktreeId, setSelectedWorktreeId] = useState<string | null>(null);
   const [terminalSize, setTerminalSize] = useState<{ cols: number; rows: number } | null>(null);
   const [selectedEnvId, setSelectedEnvId] = useState<string>(() => {
@@ -460,6 +460,7 @@ export function App() {
       onInput={handleInput}
       onResize={handleResize}
       onPtyData={onPtyData}
+      onPtySize={onPtySize}
       onNewProcess={handleNewProcess}
       onKillProcess={handleKillProcess}
       onArchiveWorktree={handleArchiveWorktree}

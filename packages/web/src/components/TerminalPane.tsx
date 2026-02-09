@@ -8,6 +8,7 @@ interface TerminalPaneProps {
   onInput: (processId: string, data: string) => void;
   onResize: (processId: string, cols: number, rows: number) => void;
   onPtyData: (processId: string, handler: (data: string) => void) => () => void;
+  onPtySize: (processId: string, handler: (cols: number, rows: number) => void) => () => void;
   onFocus?: () => void;
   onSizeChange?: (cols: number, rows: number) => void;
   emptyMessage?: string;
@@ -18,6 +19,7 @@ export function TerminalPane({
   onInput,
   onResize,
   onPtyData,
+  onPtySize,
   onFocus,
   onSizeChange,
   emptyMessage,
@@ -44,10 +46,60 @@ export function TerminalPane({
     [processId, onResize]
   );
 
+  const localTerminalSizeRef = useRef<{ cols: number; rows: number } | null>(null);
+  const serverTerminalSizeRef = useRef<{ cols: number; rows: number } | null>(null);
+  const lastCorrectionRef = useRef<{
+    processId: string;
+    localCols: number;
+    localRows: number;
+    serverCols: number;
+    serverRows: number;
+  } | null>(null);
+
+  const reconcileServerSize = useCallback((currentProcessId: string) => {
+    const local = localTerminalSizeRef.current;
+    const server = serverTerminalSizeRef.current;
+    if (!local || !server) return;
+    if (local.cols <= 0 || local.rows <= 0 || server.cols <= 0 || server.rows <= 0) return;
+    if (local.cols === server.cols && local.rows === server.rows) return;
+
+    const last = lastCorrectionRef.current;
+    if (
+      last &&
+      last.processId === currentProcessId &&
+      last.localCols === local.cols &&
+      last.localRows === local.rows &&
+      last.serverCols === server.cols &&
+      last.serverRows === server.rows
+    ) {
+      return;
+    }
+
+    lastCorrectionRef.current = {
+      processId: currentProcessId,
+      localCols: local.cols,
+      localRows: local.rows,
+      serverCols: server.cols,
+      serverRows: server.rows,
+    };
+    onResize(currentProcessId, local.cols, local.rows);
+  }, [onResize]);
+
+  const handleSizeChange = useCallback(
+    (cols: number, rows: number) => {
+      localTerminalSizeRef.current = { cols, rows };
+      onSizeChange?.(cols, rows);
+      if (processId) {
+        reconcileServerSize(processId);
+      }
+    },
+    [onSizeChange, processId, reconcileServerSize]
+  );
+
   const { terminalRef, write, fit, focus, clear, isReady } = useTerminal({
     onData: handleData,
     onResize: handleResize,
-    onSizeChange,
+    onSizeChange: handleSizeChange,
     resolvedTheme,
   });
 
@@ -71,7 +123,8 @@ export function TerminalPane({
   writeRef.current = write;
 
   const subscribedProcessIdRef = useRef<string | null>(null);
-  const cleanupRef = useRef<(() => void) | null>(null);
+  const ptyDataCleanupRef = useRef<(() => void) | null>(null);
+  const ptySizeCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     return () => {
@@ -128,9 +181,13 @@ export function TerminalPane({
 
   useEffect(() => {
     if (!isReady) {
-      if (cleanupRef.current) {
-        cleanupRef.current();
-        cleanupRef.current = null;
+      if (ptyDataCleanupRef.current) {
+        ptyDataCleanupRef.current();
+        ptyDataCleanupRef.current = null;
+      }
+      if (ptySizeCleanupRef.current) {
+        ptySizeCleanupRef.current();
+        ptySizeCleanupRef.current = null;
       }
       subscribedProcessIdRef.current = null;
       return;
@@ -140,12 +197,18 @@ export function TerminalPane({
       return;
     }
 
-    if (cleanupRef.current) {
-      cleanupRef.current();
-      cleanupRef.current = null;
+    if (ptyDataCleanupRef.current) {
+      ptyDataCleanupRef.current();
+      ptyDataCleanupRef.current = null;
+    }
+    if (ptySizeCleanupRef.current) {
+      ptySizeCleanupRef.current();
+      ptySizeCleanupRef.current = null;
     }
 
     subscribedProcessIdRef.current = processId;
+    serverTerminalSizeRef.current = null;
+    lastCorrectionRef.current = null;
     clear();
 
     if (!processId) {
@@ -155,17 +218,25 @@ export function TerminalPane({
 
     // Subscribe to PTY data first — this sends the 'attach' message so the
     // server-side PTY is prepared before we send resize dimensions.
-    cleanupRef.current = onPtyData(processId, (data) => {
+    ptyDataCleanupRef.current = onPtyData(processId, (data) => {
       writeRef.current(data);
     });
+    ptySizeCleanupRef.current = onPtySize(processId, (cols, rows) => {
+      serverTerminalSizeRef.current = { cols, rows };
+      reconcileServerSize(processId);
+    });
     scheduleFit();
-  }, [isReady, processId, onPtyData, clear, scheduleFit]);
+  }, [isReady, processId, onPtyData, onPtySize, clear, scheduleFit, reconcileServerSize]);
 
   useEffect(() => {
     return () => {
-      if (cleanupRef.current) {
-        cleanupRef.current();
-        cleanupRef.current = null;
+      if (ptyDataCleanupRef.current) {
+        ptyDataCleanupRef.current();
+        ptyDataCleanupRef.current = null;
+      }
+      if (ptySizeCleanupRef.current) {
+        ptySizeCleanupRef.current();
+        ptySizeCleanupRef.current = null;
       }
     };
   }, []);

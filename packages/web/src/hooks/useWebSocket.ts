@@ -17,12 +17,14 @@ interface UseWebSocketReturn {
   processes: Map<string, Process>;
   send: (message: BrowserToServerMessage) => void;
   onPtyData: (processId: string, handler: (data: string) => void, skipBuffer?: boolean) => () => void;
+  onPtySize: (processId: string, handler: (cols: number, rows: number) => void) => () => void;
 }
 
 export function useWebSocket(): UseWebSocketReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | undefined>(undefined);
   const ptyHandlersRef = useRef(new Map<string, Set<(data: string) => void>>());
+  const ptySizeHandlersRef = useRef(new Map<string, Set<(cols: number, rows: number) => void>>());
   const pendingMessagesRef = useRef<BrowserToServerMessage[]>([]);
 
   const [connected, setConnected] = useState(false);
@@ -73,6 +75,16 @@ export function useWebSocket(): UseWebSocketReturn {
         if (handlers) {
           for (const handler of handlers) {
             handler(message.data);
+          }
+        }
+        break;
+      }
+
+      case 'pty-size': {
+        const handlers = ptySizeHandlersRef.current.get(message.processId);
+        if (handlers) {
+          for (const handler of handlers) {
+            handler(message.cols, message.rows);
           }
         }
         break;
@@ -180,5 +192,19 @@ export function useWebSocket(): UseWebSocketReturn {
     [send]
   );
 
-  return { connected, environments, worktrees, processes, send, onPtyData };
+  const onPtySize = useCallback((processId: string, handler: (cols: number, rows: number) => void) => {
+    if (!ptySizeHandlersRef.current.has(processId)) {
+      ptySizeHandlersRef.current.set(processId, new Set());
+    }
+    ptySizeHandlersRef.current.get(processId)!.add(handler);
+
+    return () => {
+      ptySizeHandlersRef.current.get(processId)?.delete(handler);
+      if (ptySizeHandlersRef.current.get(processId)?.size === 0) {
+        ptySizeHandlersRef.current.delete(processId);
+      }
+    };
+  }, []);
+
+  return { connected, environments, worktrees, processes, send, onPtyData, onPtySize };
 }

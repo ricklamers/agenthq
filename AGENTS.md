@@ -31,12 +31,12 @@ make tail-logs          # Tail all logs
 make start WORKSPACE=/path/to/workspace
 ```
 
-### Hot Reload Behavior
+### Restart Behavior
 
-| Component | Hot Reload? | Restart Required? |
+| Component | Auto-Reload? | Restart Required? |
 |-----------|-------------|-------------------|
-| **Server** (`packages/server`) | Yes (`tsx watch`) | No - auto-reloads |
-| **Web** (`packages/web`) | Yes (Vite HMR) | No - auto-reloads |
+| **Server** (`packages/server`) | No | Yes - use `make restart-server` |
+| **Web** (`packages/web`) | No (uses `vite preview`) | Yes - rebuild and restart |
 | **Daemon** (`daemon/`) | No | Yes - use `make restart-daemon` |
 
 ### Manual Commands (if needed)

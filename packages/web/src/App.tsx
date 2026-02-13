@@ -8,6 +8,7 @@ import { SplitTerminalContainer } from './components/SplitTerminalContainer';
 import { SpawnDialog } from './components/SpawnDialog';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { SettingsPage } from './components/SettingsPage';
+import { LoginPage } from './components/LoginPage';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './components/ui/resizable';
 import { cn } from './lib/utils';
 
@@ -17,9 +18,12 @@ type ConfirmAction =
   | { type: 'archive-worktree' };
 
 const SELECTED_ENV_STORAGE_KEY = 'agenthq:selectedEnvId';
+type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 
 export function App() {
-  const { connected, environments, worktrees, processes, send, onPtyData, onPtySize } = useWebSocket();
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('loading');
+  const [authUsername, setAuthUsername] = useState<string | null>(null);
+  const { connected, environments, worktrees, processes, send, onPtyData, onPtySize } = useWebSocket(authStatus === 'authenticated');
   const [selectedWorktreeId, setSelectedWorktreeId] = useState<string | null>(null);
   const [terminalSize, setTerminalSize] = useState<{ cols: number; rows: number } | null>(null);
   const [selectedEnvId, setSelectedEnvId] = useState<string>(() => {
@@ -39,6 +43,62 @@ export function App() {
   const [autoSelectedEnvIds, setAutoSelectedEnvIds] = useState<Set<string>>(new Set());
 
   const selectedWorktree = selectedWorktreeId ? worktrees.get(selectedWorktreeId) : null;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchSession = async () => {
+      try {
+        const response = await fetch('/api/auth/me');
+        if (!response.ok) {
+          throw new Error('auth-check-failed');
+        }
+
+        const payload = (await response.json()) as {
+          authenticated?: boolean;
+          user?: { username?: string };
+        };
+
+        if (cancelled) return;
+        if (payload.authenticated && payload.user?.username) {
+          setAuthUsername(payload.user.username);
+          setAuthStatus('authenticated');
+          return;
+        }
+
+        setAuthUsername(null);
+        setAuthStatus('unauthenticated');
+      } catch {
+        if (!cancelled) {
+          setAuthUsername(null);
+          setAuthStatus('unauthenticated');
+        }
+      }
+    };
+
+    void fetchSession();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleAuthenticated = useCallback((username: string) => {
+    setAuthUsername(username);
+    setAuthStatus('authenticated');
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (err) {
+      console.error('Failed to logout:', err);
+    } finally {
+      setAuthUsername(null);
+      setAuthStatus('unauthenticated');
+      setShowSettings(false);
+      setSelectedWorktreeId(null);
+    }
+  }, []);
 
   // Get processes for the selected worktree
   const worktreeProcesses = useMemo(() => {
@@ -74,6 +134,7 @@ export function App() {
 
   // Default-select first repo's main/master worktree on first load per environment
   useEffect(() => {
+    if (authStatus !== 'authenticated') return;
     if (selectedWorktreeId) return;
     if (autoSelectedEnvIds.has(selectedEnvId)) return;
 
@@ -113,7 +174,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [selectedWorktreeId, autoSelectedEnvIds, selectedEnvId]);
+  }, [authStatus, selectedWorktreeId, autoSelectedEnvIds, selectedEnvId]);
 
   // Track worktree IDs that are pending (waiting for path to be set by daemon)
   const [pendingWorktreeId, setPendingWorktreeId] = useState<string | null>(null);
@@ -473,11 +534,26 @@ export function App() {
   );
 
   // Show settings page
+  if (authStatus === 'loading') {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-background text-sm text-muted-foreground [height:100svh]">
+        Checking session...
+      </div>
+    );
+  }
+
+  if (authStatus !== 'authenticated') {
+    return <LoginPage onAuthenticated={handleAuthenticated} />;
+  }
+
+  // Show settings page
   if (showSettings) {
     return (
       <SettingsPage
         onBack={() => setShowSettings(false)}
         environments={environments}
+        username={authUsername ?? undefined}
+        onLogout={handleLogout}
       />
     );
   }

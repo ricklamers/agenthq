@@ -9,7 +9,8 @@ import { join, resolve } from 'node:path';
 import { DEFAULT_PORT } from '@agenthq/shared';
 import { repoStore, configStore } from './state/index.js';
 import { registerDaemonWs, registerBrowserWs } from './ws/index.js';
-import { registerRepoRoutes, registerWorktreeRoutes, registerProcessRoutes, registerEnvRoutes, registerConfigRoutes } from './api/index.js';
+import { initializeAuth, getAuthService } from './auth/index.js';
+import { registerAuthRoutes, registerRepoRoutes, registerWorktreeRoutes, registerProcessRoutes, registerEnvRoutes, registerConfigRoutes } from './api/index.js';
 
 // Validate environment
 const workspace = process.env.AGENTHQ_WORKSPACE;
@@ -27,6 +28,11 @@ if (!existsSync(resolvedWorkspace)) {
 // Initialize stores with workspace
 repoStore.setWorkspace(resolvedWorkspace);
 configStore.setWorkspace(resolvedWorkspace);
+initializeAuth({
+  dbPath: process.env.AGENTHQ_AUTH_DB ?? join(resolvedWorkspace, '.agenthq', 'auth.sqlite'),
+  defaultUsername: process.env.AGENTHQ_DEFAULT_USERNAME ?? 'ricklamers',
+  defaultPassword: process.env.AGENTHQ_DEFAULT_PASSWORD ?? 'Tedkroket1903',
+});
 
 const port = parseInt(process.env.AGENTHQ_PORT ?? String(DEFAULT_PORT), 10);
 
@@ -47,11 +53,27 @@ await app.register(fastifyCors, {
 
 await app.register(fastifyWebsocket);
 
+// Protect all non-auth API endpoints
+app.addHook('onRequest', async (request, reply) => {
+  const path = request.url.split('?')[0];
+  if (!path?.startsWith('/api/') || path.startsWith('/api/auth/')) {
+    return;
+  }
+
+  const user = getAuthService().getAuthenticatedUserFromCookie(request.headers.cookie);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+
+  request.authUser = user;
+});
+
 // Register WebSocket routes
 registerDaemonWs(app);
 registerBrowserWs(app);
 
 // Register API routes
+await registerAuthRoutes(app);
 await registerRepoRoutes(app);
 await registerWorktreeRoutes(app);
 await registerProcessRoutes(app);

@@ -1,3 +1,4 @@
+export { registerAuthRoutes } from './auth.js';
 export { registerRepoRoutes } from './repos.js';
 export { registerWorktreeRoutes } from './worktrees.js';
 export { registerProcessRoutes } from './processes.js';

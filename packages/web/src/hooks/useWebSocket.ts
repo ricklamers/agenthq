@@ -20,9 +20,10 @@ interface UseWebSocketReturn {
   onPtySize: (processId: string, handler: (cols: number, rows: number) => void) => () => void;
 }
 
-export function useWebSocket(): UseWebSocketReturn {
+export function useWebSocket(enabled = true): UseWebSocketReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | undefined>(undefined);
+  const enabledRef = useRef(enabled);
   const ptyHandlersRef = useRef(new Map<string, Set<(data: string) => void>>());
   const ptySizeHandlersRef = useRef(new Map<string, Set<(cols: number, rows: number) => void>>());
   const pendingMessagesRef = useRef<BrowserToServerMessage[]>([]);
@@ -97,6 +98,10 @@ export function useWebSocket(): UseWebSocketReturn {
   }, []);
 
   const connect = useCallback(() => {
+    if (!enabledRef.current) {
+      return;
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}${WS_BROWSER_PATH}`;
 
@@ -129,6 +134,10 @@ export function useWebSocket(): UseWebSocketReturn {
       setConnected(false);
       wsRef.current = null;
 
+      if (!enabledRef.current) {
+        return;
+      }
+
       // Reconnect after delay
       reconnectTimeoutRef.current = window.setTimeout(() => {
         connect();
@@ -141,6 +150,21 @@ export function useWebSocket(): UseWebSocketReturn {
   }, [handleMessage]);
 
   useEffect(() => {
+    enabledRef.current = enabled;
+
+    if (!enabled) {
+      setConnected(false);
+      wsRef.current?.close();
+      wsRef.current = null;
+      pendingMessagesRef.current = [];
+      ptyHandlersRef.current.clear();
+      ptySizeHandlersRef.current.clear();
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      return;
+    }
+
     connect();
 
     return () => {
@@ -149,7 +173,7 @@ export function useWebSocket(): UseWebSocketReturn {
       }
       wsRef.current?.close();
     };
-  }, [connect]);
+  }, [connect, enabled]);
 
   const send = useCallback((message: BrowserToServerMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

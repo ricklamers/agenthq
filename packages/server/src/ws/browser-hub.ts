@@ -6,6 +6,7 @@ import type { BrowserToServerMessage, ServerToBrowserMessage, Process, Worktree 
 import { WS_BROWSER_PATH } from '@agenthq/shared';
 import { envStore, processStore, worktreeStore } from '../state/index.js';
 import { daemonHub } from './daemon-hub.js';
+import { getAuthService } from '../auth/index.js';
 
 // Helper to encode string to base64
 function encodeBase64(data: string): string {
@@ -164,8 +165,17 @@ export const browserHub = new BrowserHub();
 
 export function registerBrowserWs(app: FastifyInstance): void {
   app.register(async (fastify) => {
-    fastify.get(WS_BROWSER_PATH, { websocket: true }, (socket) => {
-      console.log('Browser WebSocket connected');
+    fastify.get(WS_BROWSER_PATH, {
+      websocket: true,
+      preValidation: async (request, reply) => {
+        const user = getAuthService().getAuthenticatedUserFromCookie(request.headers.cookie);
+        if (!user) {
+          return reply.status(401).send({ error: 'Unauthorized' });
+        }
+        request.authUser = user;
+      },
+    }, (socket, request) => {
+      console.log(`Browser WebSocket connected (${request.authUser?.username ?? 'unknown'})`);
       const conn = browserHub.add(socket);
 
       // Send initial state - environments
@@ -190,7 +200,7 @@ export function registerBrowserWs(app: FastifyInstance): void {
 
       socket.on('close', () => {
         browserHub.remove(conn);
-        console.log('Browser WebSocket disconnected');
+        console.log(`Browser WebSocket disconnected (${request.authUser?.username ?? 'unknown'})`);
       });
 
       socket.on('error', (err) => {

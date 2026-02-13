@@ -17,6 +17,8 @@ interface Config {
 interface SettingsPageProps {
   onBack: () => void;
   environments: Environment[];
+  username?: string;
+  onLogout: () => void;
 }
 
 const themeOptions: { value: Theme; label: string; icon: typeof Sun }[] = [
@@ -25,7 +27,7 @@ const themeOptions: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: 'dark', label: 'Dark', icon: Moon },
 ];
 
-export function SettingsPage({ onBack, environments }: SettingsPageProps) {
+export function SettingsPage({ onBack, environments, username, onLogout }: SettingsPageProps) {
   const { theme, setTheme } = useTheme();
   const [config, setConfig] = useState<Config | null>(null);
   const [daemonAuthToken, setDaemonAuthToken] = useState('');
@@ -215,6 +217,12 @@ export function SettingsPage({ onBack, environments }: SettingsPageProps) {
           ← Back
         </Button>
         <h1 className="text-lg font-semibold">Settings</h1>
+        <div className="ml-auto flex items-center gap-3">
+          {username && <span className="text-xs text-muted-foreground">Signed in as {username}</span>}
+          <Button variant="outline" size="sm" onClick={onLogout}>
+            Log out
+          </Button>
+        </div>
       </div>
 
       {/* Messages */}

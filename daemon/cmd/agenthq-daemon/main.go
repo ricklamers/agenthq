@@ -252,17 +252,6 @@ func createWorktree(wsClient *client.Client, worktreeID, repoName, repoPath stri
 
 	log.Printf("Created worktree %s at %s", worktreeID, worktreePath)
 
-	// Run setup.sh if it exists
-	setupScript := filepath.Join(repoPath, ".agenthq", "setup.sh")
-	if _, err := os.Stat(setupScript); err == nil {
-		log.Printf("Running setup script for worktree %s", worktreeID)
-		cmd := exec.Command("bash", setupScript)
-		cmd.Dir = worktreePath
-		if output, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("Setup script error: %v\n%s", err, output)
-		}
-	}
-
 	// Notify server that worktree is ready
 	wsClient.Send(protocol.DaemonMessage{
 		Type:       protocol.MsgTypeWorktreeReady,

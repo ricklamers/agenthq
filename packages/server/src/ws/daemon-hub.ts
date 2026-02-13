@@ -171,18 +171,22 @@ export function registerDaemonWs(app: FastifyInstance): void {
     fastify.get<{ Querystring: { token?: string } }>(WS_DAEMON_PATH, { websocket: true }, (socket, request) => {
       const providedToken = request.query.token;
       const expectedToken = configStore.getDaemonAuthToken();
-      
-      // If a daemon auth token is configured, verify it
-      // Local daemons (from localhost) can connect without token
-      const isLocalConnection = request.ip === '127.0.0.1' || request.ip === '::1' || request.ip === '::ffff:127.0.0.1';
-      
-      if (expectedToken && !isLocalConnection && providedToken !== expectedToken) {
+
+      // Require a daemon auth token to be configured
+      if (!expectedToken) {
+        console.log(`Daemon connection rejected: no daemon auth token configured`);
+        socket.close(4003, 'No daemon auth token configured on server');
+        return;
+      }
+
+      // All connections must provide a valid token (including localhost)
+      if (providedToken !== expectedToken) {
         console.log(`Daemon connection rejected: invalid token from ${request.ip}`);
         socket.close(4001, 'Invalid auth token');
         return;
       }
       
-      console.log(`Daemon WebSocket connected from ${request.ip} (local: ${isLocalConnection})`);
+      console.log(`Daemon WebSocket connected from ${request.ip}`);
       let envId: string | null = null;
 
       socket.on('message', (data) => {

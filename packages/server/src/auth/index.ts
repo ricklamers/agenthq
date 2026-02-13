@@ -10,7 +10,9 @@ interface InitAuthOptions {
 
 export function initializeAuth(options: InitAuthOptions): AuthService {
   const service = new AuthService({ dbPath: options.dbPath });
-  service.seedUser(options.defaultUsername, options.defaultPassword);
+  if (options.defaultUsername && options.defaultPassword) {
+    service.seedUser(options.defaultUsername, options.defaultPassword);
+  }
   authServiceInstance = service;
   return service;
 }

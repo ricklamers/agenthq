@@ -30,8 +30,8 @@ repoStore.setWorkspace(resolvedWorkspace);
 configStore.setWorkspace(resolvedWorkspace);
 initializeAuth({
   dbPath: process.env.AGENTHQ_AUTH_DB ?? join(resolvedWorkspace, '.agenthq', 'auth.sqlite'),
-  defaultUsername: process.env.AGENTHQ_DEFAULT_USERNAME ?? 'ricklamers',
-  defaultPassword: process.env.AGENTHQ_DEFAULT_PASSWORD ?? 'Tedkroket1903',
+  defaultUsername: process.env.AGENTHQ_DEFAULT_USERNAME ?? '',
+  defaultPassword: process.env.AGENTHQ_DEFAULT_PASSWORD ?? '',
 });
 
 const port = parseInt(process.env.AGENTHQ_PORT ?? String(DEFAULT_PORT), 10);

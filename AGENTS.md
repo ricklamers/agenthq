@@ -56,9 +56,9 @@ cd daemon && go build ./cmd/agenthq-daemon && ./agenthq-daemon
 
 ### Canonical Checkout
 
-- Active checkout for live development:
-  - `/tmp/agenthq-test/agenthq`
-- Do not run the app from `/home/rick/workspace/agenthq` anymore.
+- **The only checkout is `/tmp/agenthq-test/agenthq`.**
+- All development, editing, committing, and running happens here.
+- There is no secondary workspace. Do not create or use other clones.
 
 ### Runtime Process Manager
 
@@ -88,17 +88,6 @@ systemctl --user restart agenthq-server agenthq-web agenthq-daemon
 # logs
 journalctl --user -u agenthq-server -u agenthq-web -u agenthq-daemon -f
 ```
-
-### Two Checkouts
-
-There are two copies of the repo on this host:
-
-| Path | Purpose |
-|------|---------|
-| `/tmp/agenthq-test/agenthq` | **Production clone** — all systemd services run from here |
-| `/home/rick/workspace/agenthq` | Development workspace (for editing/committing) |
-
-**Keep them in sync.** After pushing from either location, pull in the other. The systemd services only see `/tmp/agenthq-test/agenthq`, so any code change must land there before restarting.
 
 ### Daemon Auth Token
 

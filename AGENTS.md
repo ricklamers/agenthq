@@ -42,13 +42,13 @@ make start WORKSPACE=/path/to/workspace
 ### Manual Commands (if needed)
 
 ```bash
-# Server (has hot reload)
+# Server (no auto-reload)
 cd packages/server && pnpm dev
 
-# Web (has hot reload)  
-cd packages/web && pnpm dev
+# Web (no auto-reload, serves built assets)
+cd packages/web && pnpm preview
 
-# Daemon (no hot reload)
+# Daemon (no auto-reload)
 cd daemon && go build ./cmd/agenthq-daemon && ./agenthq-daemon
 ```
 
@@ -89,12 +89,31 @@ systemctl --user restart agenthq-server agenthq-web agenthq-daemon
 journalctl --user -u agenthq-server -u agenthq-web -u agenthq-daemon -f
 ```
 
+### Two Checkouts
+
+There are two copies of the repo on this host:
+
+| Path | Purpose |
+|------|---------|
+| `/tmp/agenthq-test/agenthq` | **Production clone** — all systemd services run from here |
+| `/home/rick/workspace/agenthq` | Development workspace (for editing/committing) |
+
+**Keep them in sync.** After pushing from either location, pull in the other. The systemd services only see `/tmp/agenthq-test/agenthq`, so any code change must land there before restarting.
+
+### Daemon Auth Token
+
+The daemon must authenticate to the server via `AGENTHQ_AUTH_TOKEN`. The token is stored in:
+- **Server side:** `/tmp/agenthq-test/.agenthq-meta/config.json` (`daemonAuthToken` field)
+- **Daemon side:** `AGENTHQ_AUTH_TOKEN` env var in `agenthq-daemon.service`
+
+If the server rejects the daemon with `Invalid auth token`, verify these match.
+
 ### Runtime Topology
 
 - Workspace: `/tmp/agenthq-test`
-- Server: `http://127.0.0.1:3000` (`pnpm --filter @agenthq/server dev`)
-- Web (Vite preview, built assets): `http://127.0.0.1:5173` (`pnpm --filter @agenthq/web exec vite preview --host 127.0.0.1 --port 5173 --strictPort`)
-- Daemon connects to: `ws://127.0.0.1:3000/ws/daemon`
+- Server: `http://127.0.0.1:3000` (no auto-reload, `tsx src/index.ts`)
+- Web (Vite preview, built assets): `http://127.0.0.1:5173`
+- Daemon connects to: `ws://127.0.0.1:3000/ws/daemon` with auth token
 - Nginx domain: `agenthq.omba.nl`
   - `80 -> 301 https`
   - `443` is basic-auth protected and reverse proxies to Vite/API/WS
@@ -133,12 +152,12 @@ Use this to decide what to run after code changes in `/tmp/agenthq-test/agenthq`
 | Change Type | Required Step(s) |
 |-------------|------------------|
 | **Frontend only** (`packages/web/**`) | Run `pnpm --filter @agenthq/web build` **only**. |
-| **Server only** (`packages/server/**`) | No rebuild needed in current dev setup (`tsx watch`); restart only if needed: `systemctl --user restart agenthq-server` |
+| **Server only** (`packages/server/**`) | Restart server: `systemctl --user restart agenthq-server` |
 | **Daemon only** (`daemon/**`) | Rebuild/restart daemon: `make restart-daemon` or `systemctl --user restart agenthq-daemon` after rebuild workflow |
-| **Frontend + Server** | Run web build, and ensure server reflects changes (watch/restart if needed) |
+| **Frontend + Server** | Run web build and restart server |
 | **Frontend + Daemon** | Run web build and restart daemon |
-| **Server + Daemon** | Ensure server changes are active (watch/restart if needed) and restart daemon |
-| **All three** | Run web build, ensure server changes are active, restart daemon |
+| **Server + Daemon** | Restart server, then restart daemon |
+| **All three** | Run web build, restart server, restart daemon |
 
 Rule of thumb: **If changes are only about the frontend, only run the frontend build.**
 

@@ -3,7 +3,6 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { WebglAddon } from '@xterm/addon-webgl';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import '@xterm/xterm/css/xterm.css';
 
@@ -151,17 +150,11 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     terminal.loadAddon(unicode11Addon);
     terminal.unicode.activeVersion = '11';
 
-    const webglAddon = new WebglAddon();
-    terminal.loadAddon(webglAddon);
-    webglAddon.onContextLoss(() => {
-      webglAddon.dispose();
-    });
-
     terminal.open(node);
     fitAddonRef.current = fitAddon;
     xtermRef.current = terminal;
 
-    // WebGL canvas eats wheel/touch events — manually scroll the buffer
+    // Handle wheel/touch scrolling explicitly for consistent behavior.
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       const lines = Math.round(e.deltaY / 20);

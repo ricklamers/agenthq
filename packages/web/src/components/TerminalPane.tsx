@@ -3,6 +3,8 @@ import type { Process } from '@agenthq/shared';
 import { useTerminal } from '@/hooks/useTerminal';
 import { useTheme } from '@/hooks/useTheme';
 
+const MOBILE_BREAKPOINT_QUERY = '(max-width: 767px)';
+
 interface TerminalPaneProps {
   process: Process | null;
   onInput: (processId: string, data: string) => void;
@@ -104,6 +106,7 @@ export function TerminalPane({
   });
 
   const fitRafRef = useRef<number | null>(null);
+  const lastPaneSizeRef = useRef<{ width: number; height: number } | null>(null);
 
   const scheduleFit = useCallback(() => {
     if (!isReady) return;
@@ -113,6 +116,43 @@ export function TerminalPane({
       fit();
     });
   }, [fit, isReady]);
+
+  const scheduleFitForPaneLayout = useCallback((force = false) => {
+    const pane = paneRef.current;
+    if (!pane) {
+      if (force) {
+        scheduleFit();
+      }
+      return;
+    }
+
+    const rect = pane.getBoundingClientRect();
+    const width = Math.round(rect.width);
+    const height = Math.round(rect.height);
+    const last = lastPaneSizeRef.current;
+    const widthChanged = !last || width !== last.width;
+    const heightChanged = !last || height !== last.height;
+    lastPaneSizeRef.current = { width, height };
+
+    if (!force && !widthChanged && !heightChanged) {
+      return;
+    }
+
+    if (!force && widthChanged === false && heightChanged) {
+      const isMobile = window.matchMedia(MOBILE_BREAKPOINT_QUERY).matches;
+      const activeElement = document.activeElement;
+      const terminalInputFocused = Boolean(activeElement && pane.contains(activeElement));
+
+      // Mobile soft-keyboard transitions can cause 1-row churn and push
+      // visible lines into scrollback. Ignore height-only relayouts while
+      // terminal input is focused.
+      if (isMobile && terminalInputFocused) {
+        return;
+      }
+    }
+
+    scheduleFit();
+  }, [scheduleFit]);
 
   const focusPane = useCallback(() => {
     focus();
@@ -143,17 +183,17 @@ export function TerminalPane({
     const targets = [pane.parentElement, pane].filter((target): target is HTMLElement => Boolean(target));
     if (targets.length === 0) return;
 
-    scheduleFit();
+    scheduleFitForPaneLayout(true);
 
     const resizeObserver = new ResizeObserver(() => {
-      scheduleFit();
+      scheduleFitForPaneLayout();
     });
     for (const target of targets) {
       resizeObserver.observe(target);
     }
 
     const mutationObserver = new MutationObserver(() => {
-      scheduleFit();
+      scheduleFitForPaneLayout();
     });
     for (const target of targets) {
       mutationObserver.observe(target, {
@@ -164,20 +204,23 @@ export function TerminalPane({
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        scheduleFit();
+        scheduleFitForPaneLayout(true);
       }
+    };
+    const handleOrientationChange = () => {
+      scheduleFitForPaneLayout(true);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('orientationchange', scheduleFit);
+    window.addEventListener('orientationchange', handleOrientationChange);
 
     return () => {
       resizeObserver.disconnect();
       mutationObserver.disconnect();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('orientationchange', scheduleFit);
+      window.removeEventListener('orientationchange', handleOrientationChange);
     };
-  }, [isReady, scheduleFit]);
+  }, [isReady, scheduleFitForPaneLayout]);
 
   useEffect(() => {
     if (!isReady) {

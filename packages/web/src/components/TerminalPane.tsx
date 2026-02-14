@@ -4,6 +4,7 @@ import { useTerminal } from '@/hooks/useTerminal';
 import { useTheme } from '@/hooks/useTheme';
 
 const MOBILE_BREAKPOINT_QUERY = '(max-width: 767px)';
+const MOBILE_HEIGHT_JITTER_PX = 24;
 
 interface TerminalPaneProps {
   process: Process | null;
@@ -132,6 +133,7 @@ export function TerminalPane({
     const last = lastPaneSizeRef.current;
     const widthChanged = !last || width !== last.width;
     const heightChanged = !last || height !== last.height;
+    const heightDelta = last ? Math.abs(height - last.height) : 0;
     lastPaneSizeRef.current = { width, height };
 
     if (!force && !widthChanged && !heightChanged) {
@@ -145,8 +147,8 @@ export function TerminalPane({
 
       // Mobile soft-keyboard transitions can cause 1-row churn and push
       // visible lines into scrollback. Ignore height-only relayouts while
-      // terminal input is focused.
-      if (isMobile && terminalInputFocused) {
+      // terminal input is focused, but only for tiny jitter-sized deltas.
+      if (isMobile && terminalInputFocused && heightDelta <= MOBILE_HEIGHT_JITTER_PX) {
         return;
       }
     }

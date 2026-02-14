@@ -10,6 +10,8 @@ import type {
 } from '@agenthq/shared';
 import { WS_BROWSER_PATH } from '@agenthq/shared';
 
+const RECONNECT_DELAY_MS = 2000;
+
 interface UseWebSocketReturn {
   connected: boolean;
   environments: Environment[];
@@ -23,8 +25,10 @@ interface UseWebSocketReturn {
 export function useWebSocket(enabled = true): UseWebSocketReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | undefined>(undefined);
+  const hasConnectedOnceRef = useRef(false);
   const enabledRef = useRef(enabled);
   const ptyHandlersRef = useRef(new Map<string, Set<(data: string) => void>>());
+  const ptyAttachOptionsRef = useRef(new Map<string, { skipBuffer?: boolean }>());
   const ptySizeHandlersRef = useRef(new Map<string, Set<(cols: number, rows: number) => void>>());
   const pendingMessagesRef = useRef<BrowserToServerMessage[]>([]);
 
@@ -97,9 +101,20 @@ export function useWebSocket(enabled = true): UseWebSocketReturn {
     }
   }, []);
 
+  const isSocketActive = useCallback((ws: WebSocket | null) => {
+    return ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING;
+  }, []);
+
   const connect = useCallback(() => {
     if (!enabledRef.current) {
       return;
+    }
+    if (isSocketActive(wsRef.current)) {
+      return;
+    }
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = undefined;
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -111,8 +126,22 @@ export function useWebSocket(enabled = true): UseWebSocketReturn {
     ws.onopen = () => {
       console.log('WebSocket connected');
       setConnected(true);
-      
-      // Flush any messages that were queued before connection
+
+      const isReconnect = hasConnectedOnceRef.current;
+      hasConnectedOnceRef.current = true;
+
+      if (isReconnect) {
+        for (const processId of ptyHandlersRef.current.keys()) {
+          const attachOptions = ptyAttachOptionsRef.current.get(processId);
+          const attachMessage: BrowserToServerMessage =
+            attachOptions?.skipBuffer === undefined
+              ? { type: 'attach', processId }
+              : { type: 'attach', processId, skipBuffer: attachOptions.skipBuffer };
+          ws.send(JSON.stringify(attachMessage));
+        }
+      }
+
+      // Flush any messages that were queued before connection.
       const pending = pendingMessagesRef.current;
       pendingMessagesRef.current = [];
       for (const msg of pending) {
@@ -132,22 +161,28 @@ export function useWebSocket(enabled = true): UseWebSocketReturn {
     ws.onclose = () => {
       console.log('WebSocket disconnected');
       setConnected(false);
-      wsRef.current = null;
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
 
       if (!enabledRef.current) {
         return;
       }
 
       // Reconnect after delay
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
       reconnectTimeoutRef.current = window.setTimeout(() => {
+        reconnectTimeoutRef.current = undefined;
         connect();
-      }, 2000);
+      }, RECONNECT_DELAY_MS);
     };
 
     ws.onerror = (err) => {
       console.error('WebSocket error:', err);
     };
-  }, [handleMessage]);
+  }, [handleMessage, isSocketActive]);
 
   useEffect(() => {
     enabledRef.current = enabled;
@@ -158,9 +193,11 @@ export function useWebSocket(enabled = true): UseWebSocketReturn {
       wsRef.current = null;
       pendingMessagesRef.current = [];
       ptyHandlersRef.current.clear();
+      ptyAttachOptionsRef.current.clear();
       ptySizeHandlersRef.current.clear();
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = undefined;
       }
       return;
     }
@@ -170,10 +207,40 @@ export function useWebSocket(enabled = true): UseWebSocketReturn {
     return () => {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = undefined;
       }
       wsRef.current?.close();
     };
   }, [connect, enabled]);
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    const reconnectIfNeeded = () => {
+      if (!enabledRef.current || isSocketActive(wsRef.current)) {
+        return;
+      }
+      connect();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        reconnectIfNeeded();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', reconnectIfNeeded);
+    window.addEventListener('online', reconnectIfNeeded);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', reconnectIfNeeded);
+      window.removeEventListener('online', reconnectIfNeeded);
+    };
+  }, [connect, enabled, isSocketActive]);
 
   const send = useCallback((message: BrowserToServerMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -201,6 +268,7 @@ export function useWebSocket(enabled = true): UseWebSocketReturn {
 
       // Only send attach on first handler registration
       if (isFirstHandler) {
+        ptyAttachOptionsRef.current.set(processId, { skipBuffer });
         send({ type: 'attach', processId, skipBuffer });
       }
 
@@ -209,6 +277,7 @@ export function useWebSocket(enabled = true): UseWebSocketReturn {
         ptyHandlersRef.current.get(processId)?.delete(handler);
         if (ptyHandlersRef.current.get(processId)?.size === 0) {
           ptyHandlersRef.current.delete(processId);
+          ptyAttachOptionsRef.current.delete(processId);
           send({ type: 'detach', processId });
         }
       };

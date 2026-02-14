@@ -3,6 +3,7 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import '@xterm/xterm/css/xterm.css';
 
@@ -149,6 +150,12 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
     const unicode11Addon = new Unicode11Addon();
     terminal.loadAddon(unicode11Addon);
     terminal.unicode.activeVersion = '11';
+
+    const webglAddon = new WebglAddon();
+    terminal.loadAddon(webglAddon);
+    webglAddon.onContextLoss(() => {
+      webglAddon.dispose();
+    });
 
     terminal.open(node);
     fitAddonRef.current = fitAddon;

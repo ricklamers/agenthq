@@ -101,6 +101,10 @@ class BrowserHub {
       }
 
       case 'resize': {
+        // Ignore impossibly small resize requests — these are transient
+        // measurements from the frontend during layout transitions.
+        if (message.cols < 20 || message.rows < 5) break;
+
         // Forward to daemon
         const process = processStore.get(message.processId);
         if (process) {

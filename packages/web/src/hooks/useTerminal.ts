@@ -95,7 +95,10 @@ export function useTerminal(options: UseTerminalOptions = {}): UseTerminalReturn
   onSizeChangeRef.current = options.onSizeChange;
 
   const reportSize = useCallback((cols: number, rows: number) => {
-    if (cols <= 0 || rows <= 0) return;
+    // Reject zero/negative AND transiently tiny sizes from fitAddon.fit()
+    // during initial layout before CSS has settled (e.g. resizable panels
+    // starting at 0-width).  A sub-20-col terminal is unusable.
+    if (cols < 20 || rows < 5) return;
     const last = lastSizeRef.current;
     if (last && last.cols === cols && last.rows === rows) return;
     lastSizeRef.current = { cols, rows };

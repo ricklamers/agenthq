@@ -15,14 +15,19 @@ interface CreateProcessBody {
   yoloMode?: boolean;
 }
 
+// Minimum usable terminal dimensions.  Sub-20-col sizes are almost
+// certainly transient measurements from the frontend during initial layout.
+const MIN_COLS = 20;
+const MIN_ROWS = 5;
+
 function isValidTerminalSize(cols: unknown, rows: unknown): boolean {
   return (
     typeof cols === 'number' &&
     typeof rows === 'number' &&
     Number.isFinite(cols) &&
     Number.isFinite(rows) &&
-    cols > 0 &&
-    rows > 0
+    cols >= MIN_COLS &&
+    rows >= MIN_ROWS
   );
 }
 

@@ -470,7 +470,11 @@ export function App() {
   }, []);
 
   const handleTerminalSizeChange = useCallback((cols: number, rows: number) => {
-    if (cols <= 0 || rows <= 0) return;
+    // Reject zero/negative AND transiently small sizes that occur during
+    // initial layout (e.g. before resizable panels have computed their widths).
+    // A terminal narrower than 20 cols is unusable and almost certainly a
+    // measurement taken before CSS layout has settled.
+    if (cols < 20 || rows < 5) return;
     setTerminalSize((prev) => {
       if (prev && prev.cols === cols && prev.rows === rows) {
         return prev;
